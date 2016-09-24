@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <set>
+#include <string.h>
 #include <vector>
 
 typedef std::vector<int>        sequence;
@@ -8,39 +9,84 @@ typedef std::vector<alternate>  grammar;
 
 typedef std::vector<int>        input;
 
-bool Parse(grammar&, input const& expr);
+bool Parse(const char**, grammar&, input const& expr);
+void PrintAlt(const char** names, grammar& G, int rule, int alt, int dot=-1, int ref=-1);
+void PrintRule(const char** names, grammar& G, int rule);
+void PrintGrammar(const char** names, grammar& G);
 
-enum
+int main(int argc, char *argv[])
 {
-    ENTRY,
-    SUM,
-    PRODUCT,
-    FACTOR,
-    NUMBER,
-    DIGIT,
-    PLUSMINUS,
-    TIMESDIVIDE,
-    LPAREN,
-    RPAREN,
-};
+    if (!strcmp(argv[1], "math"))
+    {
+        enum
+        {
+            ENTRY,
+            SUM,
+            PRODUCT,
+            FACTOR,
+            NUMBER,
+            DIGIT,
+            PLUSMINUS,
+            TIMESDIVIDE,
+            LPAREN,
+            RPAREN,
+        };
 
-const char* NAMES[] =
-{
-    "ENTRY",
-    "SUM",
-    "PRODUCT",
-    "FACTOR",
-    "NUMBER",
-    "DIGIT",
-    "PLUS-MINUS",
-    "TIMES-DIVIDE",
-    "(",
-    ")",
-};
+        const char* MATH_NAMES[] =
+        {
+            "ENTRY",
+            "SUM",
+            "PRODUCT",
+            "FACTOR",
+            "NUMBER",
+            "DIGIT",
+            "PLUS-MINUS",
+            "TIMES-DIVIDE",
+            "(",
+            ")",
+        };
 
-void PrintAlt(grammar& G, int rule, int alt, int dot=-1, int ref=-1)
+        grammar G  = {
+            {
+                { SUM },
+            },
+            {
+                { SUM, PLUSMINUS, PRODUCT },
+                { PRODUCT },
+            },
+            {
+                { PRODUCT, TIMESDIVIDE, FACTOR },
+                { FACTOR },
+            },
+            {
+                { LPAREN, SUM, RPAREN },
+                { NUMBER },
+            },
+            {
+                { DIGIT, NUMBER },
+                { DIGIT },
+            },
+        };
+
+        PrintGrammar(MATH_NAMES, G);
+
+        input expr = { DIGIT, PLUSMINUS, LPAREN, DIGIT, TIMESDIVIDE, DIGIT, PLUSMINUS, DIGIT, RPAREN };
+
+        fprintf(stdout, "Parse %s.\n",
+            Parse(MATH_NAMES, G, expr)
+            ? "succeeded"
+            : "failed");
+    }
+    else if (!strcmp(argv[1], "nullable"))
+    {
+    }
+
+    return 0;
+}
+
+void PrintAlt(const char** names, grammar& G, int rule, int alt, int dot, int ref)
 {
-    fprintf(stdout, "%12s ::=", NAMES[rule]);
+    fprintf(stdout, "%12s ::=", names[rule]);
     sequence const& s   = G[rule][alt];
     int length  = 0;
     for (int TT = 0, TE = s.size(); TT < TE; ++TT)
@@ -49,7 +95,7 @@ void PrintAlt(grammar& G, int rule, int alt, int dot=-1, int ref=-1)
         {
             length += fprintf(stdout, " %s", "*");
         }
-        length += fprintf(stdout, " %s", NAMES[s[TT]]);
+        length += fprintf(stdout, " %s", names[s[TT]]);
     }
     if ((dot >= 0) && (dot >= s.size()))
     {
@@ -66,56 +112,20 @@ void PrintAlt(grammar& G, int rule, int alt, int dot=-1, int ref=-1)
     fprintf(stdout, "%s", "\n");
 }
 
-void PrintRule(grammar& G, int rule)
+void PrintRule(const char** names, grammar& G, int rule)
 {
     for (int AA = 0, AE = G[rule].size(); AA < AE; ++AA)
     {
-        PrintAlt(G, rule, AA);
+        PrintAlt(names, G, rule, AA);
     }
 }
 
-void PrintGrammar(grammar& G)
+void PrintGrammar(const char** names, grammar& G)
 {
     for (int RR = 0, RE = G.size(); RR < RE; ++RR)
     {
-        PrintRule(G, RR);
+        PrintRule(names, G, RR);
     }
-}
-
-int main(int argc, char *argv[])
-{
-    grammar G  = {
-        {
-            { SUM },
-        },
-        {
-            { SUM, PLUSMINUS, PRODUCT },
-            { PRODUCT },
-        },
-        {
-            { PRODUCT, TIMESDIVIDE, FACTOR },
-            { FACTOR },
-        },
-        {
-            { LPAREN, SUM, RPAREN },
-            { NUMBER },
-        },
-        {
-            { DIGIT, NUMBER },
-            { DIGIT },
-        },
-    };
-
-    PrintGrammar(G);
-
-    input expr = { DIGIT, PLUSMINUS, LPAREN, DIGIT, TIMESDIVIDE, DIGIT, PLUSMINUS, DIGIT, RPAREN };
-
-    fprintf(stdout, "Parse %s.\n",
-        Parse(G, expr)
-        ? "succeeded"
-        : "failed");
-
-    return 0;
 }
 
 typedef std::tuple<int, int, int, int>  item_t;
@@ -130,7 +140,7 @@ enum
     REF,
 };
 
-bool Parse(grammar& G, input const& expr)
+bool Parse(const char** names, grammar& G, input const& expr)
 {
     itemvector_t    states;
     states.resize(expr.size() + 1);
@@ -203,7 +213,7 @@ bool Parse(grammar& G, input const& expr)
             auto dot    = std::get<DOT>(item);
             auto ref    = std::get<REF>(item);
             fprintf(stdout, "%s", "    ");
-            PrintAlt(G, rule, alt, dot, ref);
+            PrintAlt(names, G, rule, alt, dot, ref);
         }
     }
 
@@ -212,7 +222,7 @@ bool Parse(grammar& G, input const& expr)
         auto rule   = std::get<RULE>(item);
         auto alt    = std::get<ALT>(item);
         auto dot    = std::get<DOT>(item);
-        if ((rule == ENTRY) && (dot >= G[rule][alt].size()))
+        if ((rule == 0) && (dot >= G[rule][alt].size()))
         {
             return true;
         }
