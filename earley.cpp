@@ -198,6 +198,12 @@ enum
     REF,
 };
 
+bool RecursiveNullableSet(const char** name, grammar& G)
+{
+    // Reject grammars that have cycles of nullable sets.
+    return false;
+}
+
 void BuildNullableSet(const char** names, grammar& G, nullableset& nullset)
 {
     typedef std::set<int>               rule2rule_t;
