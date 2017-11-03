@@ -1,0 +1,1314 @@
+bplist00�_WebMainResource_WebSubresources�	
+_WebResourceData_WebResourceMIMEType_WebResourceTextEncodingName^WebResourceURL_WebResourceFrameNameO�k<!DOCTYPE html><html><head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <link rel="stylesheet" href="/style.css">
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <link rel="alternate" type="application/atom+xml" href="/updates.xml">
+    <title>
+The Recogniser
+</title>
+    <meta name="description" content="
+The first step: determining if the input is valid at all.  Beware, I left a nasty bug in there.
+">
+  </head>
+  <body>
+    <header>
+      <img id="logo" width="136" height="150" border="0" src="/penrose.png" alt="logo">
+      <h1>@ Loup's</h1>
+      <blockquote><p>Impossible?  Like that would stop me.</p></blockquote>
+    </header>
+
+    <article> 
+<h1>Earley Parsing Explained — The Recogniser</h1>
+
+<p>(The impatient may download the <a href="recogniser.lua">source code</a>.)</p>
+
+<p>We will use this grammar:</p>
+
+<pre><code>Sum     = Sum     [+-] Product
+        | Product
+Product = Product [*/] Factor
+        | Factor
+Factor  = '(' Sum ')'
+        | Number
+Number  = [0-9]+
+</code></pre>
+
+<p>However, Earley parsers don't recognise EBNF grammars directly.  We
+need to use this restricted syntax:</p>
+
+<pre><code>Sum     -&gt; Sum     [+-] Product
+Sum     -&gt; Product
+Product -&gt; Product [*/] Factor
+Product -&gt; Factor
+Factor  -&gt; '(' Sum ')'
+Factor  -&gt; Number
+Number  -&gt; [0-9] Number
+Number  -&gt; [0-9]
+</code></pre>
+
+<p>Don't worry, this notation is just as powerful as the full EBNF.  We
+will automate the translation process <a href="handling-bnf">later</a>.</p>
+
+<h2>Vocabulary</h2>
+
+<h3>Grammars, rules, and symbols</h3>
+
+<p>For the purposes of Earley parsing, a <em>grammar</em> is a set of <em>rules</em>.
+Here is a rule:</p>
+
+<pre><code>Product -&gt; Product [*/] Factor
+</code></pre>
+
+<p>The left hand side of a rule (<code>Product</code> in this example) is called a
+<em>non-terminal symbol</em>.  The right hand side (<code>Product&nbsp;[*/]&nbsp;Factor</code> in
+this example) is a list of symbols: non-terminal symbols (<code>Product</code>
+and <code>Factor</code> in this example), and <em>terminal symbols</em> (<code>[*/]</code> in this
+example).</p>
+
+<p>A terminal symbol is a function from characters to booleans.  It tells
+you if a given character matches.  Popular short hands for such
+functions look like <code>'x'</code> (matches the character 'x' only), or
+<code>[+-*/]</code> (matches '+', '-', '*', and '/'), or <code>[0-9]</code> (matches all
+numbers).</p>
+
+<h3>Earley items</h3>
+
+<p>I said previously that chart parsers construct lists of partial
+parses.  Earley parsers are no exception.  They just call those
+partial parses <em>Earley items</em>. Here is an Earley item:</p>
+
+<pre><code>Sum -&gt; Sum • [+-] Product  (0)
+</code></pre>
+
+<p>It is just like a grammar rule, with a couple more things: a fat dot
+somewhere in the right hand side, and a number at the far right.  And
+of course, it represents a partial parse.  Here is another way to view
+this item:</p>
+
+<pre><code> ┌────────────│──────────────┐
+┌┤ Sum -&gt; Sum │ [+-] Product ├──&gt;?
+│└────────────│──────────────┘
+│             V
+┌─────────────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┐
+│      1      │  +  │  (  │  2  │  *  │  3  │  -  │  4  │  )  │
+└─────────────┴─────┴─────┴─────┴─────┴─────┴─────┴─────┴─────┘
+              ^
+              └─ current position
+</code></pre>
+
+<ul>
+<li>The number between the parentheses represents where the item
+<em>starts</em>.  <code>(0)</code> means it starts at the beginning of the input.</li>
+<li>The fat dot represent <em>how much</em> has been parsed so far.  Whatever
+lies on its left is <em>done</em>.  Whatever lies on its right has yet to
+be tested.  In this example, the very next thing to test is the
+terminal token <code>[+-]</code>.</li>
+</ul>
+
+<p>The astute reader may have noticed a key piece of information that I
+have represented in the chart, yet is conspicuously absent from the
+item itself: the current position.  This information is crucial, but
+Earley's algorithm doesn't need the items to store their own current
+position.  That's because all the items with the same current position
+are stored together in a <em>state set</em>. (I don't know why nobody calls
+them "item sets" instead.  Whatever.)  That state set is itself stored
+in an array.  Its position in that array denotes the current position
+of the Earley items.</p>
+
+<p>If you are able to look at a particular item, you know its current
+position, because that's how you found it in the first place.</p>
+
+<h3>State sets</h3>
+
+<p>State sets are kind of weird.  They are sets all right, in the sense
+that they don't contain multiple copies of the same item.  On the
+other hand, for the purpose of Earley's algorithm, it is easier to
+think of them as <a href="https://en.wikipedia.org/wiki/Dynamic_array" title="Wikipedia">dynamic arrays</a>.</p>
+
+<p>Those state sets are stored in a big dynamic array, generally simply
+called 'S'.  Here is a possible representation.</p>
+
+<pre><code>┌──────┬──────┬──────┐
+│ S(0) │ S(1) │ S(2) │ &lt;── the outer array, called 'S'
+└──┬───┴──┬───┴──┬───┘
+   │      │      │
+   │      │      V
+   │      │   ┌─────┬─────┬─────┬─────┐
+   │      │   │ ... │ ... │ ... │ ... │ &lt;── a state set, S(2)
+   │      V   └─────┴─────┴─────┴─────┘
+   │   ┌─────┬─────┬─────┐
+   │   │ ... │ ... │ ... │ &lt;── another state set, S(1)
+   V   └─────┴─────┴──│──┘
+┌─────┬─────┬─────┐   │
+│ ... │ ... │ ... │   └── an Earley item
+└─────┴─────┴─────┘
+</code></pre>
+
+<p>(We can do nice optimisations about storing the state sets
+contiguously in memory, but let's ignore that for now.  New state set,
+new array.)</p>
+
+<h3>The big array and the input</h3>
+
+<p>Earley parsers are incremental parsers:  as soon as they have read a
+token, they gather as much information as they can about the partial
+parses that make sense.  Concretely, this means the big array, S, is
+constructed piece by piece, with one element per input token (plus one
+initial element).</p>
+
+<p>Here is what S looks like when we have read the first two tokens.</p>
+
+<pre><code>┌──────┬──────┬──────┐
+│ S(0) │ S(1) │ S(2) │
+└──┬───┴──┬───┴──┬───┘
+   V      V      V
+   ┌──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┐
+   │  1   │  +   │  (   │  2   │  *   │  3   │  -   │  4   │  )   │
+   └──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┘
+</code></pre>
+
+<p>The arrows here indicate the current position of each state set in S.
+Those positions are <em>between</em> tokens.  Which makes sense, considering a
+character is either read, or not read.  When <code>S(2)</code> is created, it
+means we have read the first 2 characters.</p>
+
+<p><code>S(0)</code> is created before we read anything.  That's the initial state.
+When we will be finished with this input, if all goes well, we will
+have created 10 state sets, up to <code>S(9)</code>.  This last state set is
+created when we have read everything.</p>
+
+<h2>Start up</h2>
+
+<p>The parsing starts by initialising the first state set.  We typically
+chose the rules by name.  In our "hello world", that would be every
+rule named <code>Sum</code>.</p>
+
+<pre><code>   ┌──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┐
+   │  1   │  +   │  (   │  2   │  *   │  3   │  -   │  4   │  )   │
+   └──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┘
+┌──────┐
+│ S(0) │ &lt;── Our big array, S, contains only one state set.
+└──┬───┘
+   │     ┌── Our only state set, S(0), contains 2 Earley items.
+   V     V
+┌───────────────────────────────┐
+│ Sum -&gt; • Sum [+-] Product (0) │
+├───────────────────────────────┤
+│ Sum -&gt; • Product          (0) │
+└───────────────────────────────┘
+</code></pre>
+
+<p>Note how I produced the items:</p>
+
+<ul>
+<li>We start at the beginning, and have read no input yet.  The current
+position is therefore <code>(0)</code>.  I put the item in <code>S(0)</code>.</li>
+<li>The items are brand new So, their start position is the same as the
+current position: <code>(0)</code>.  Which you can see at the right of both
+items.</li>
+<li>As brand new items, nothing has been parsed yet.  Everything is yet
+to be done (or tested).  We put the fat dot at the very beginning of
+the item.</li>
+</ul>
+
+<h2>Main loop</h2>
+
+<p>Now that we have initialised our data, we can loop over it.  There are
+two loops to consider: an inner loop, which loops over a single state
+set, and an outer loop, which loops over the main array of state set.</p>
+
+<h3>Inner loop</h3>
+
+<p>Basically, we go over each Earley item in the current state set.  When
+we begin the algorithm, the current state set is <code>S(0)</code> (we'll do the
+rest later).</p>
+
+<p>While going over the items, we may add even <em>more</em> items to either the
+current state, or the next one.  (For the first inner loop, this means
+<code>S(0)</code> and <code>S(1)</code>).  We continue until there are no more items in the
+current state set to process.  This can go on for a while: whenever we
+add an item to the current state set, it will need to be processed just
+like the others.</p>
+
+<p>This looks like this:</p>
+
+<pre><code>             current
+              item
+                │
+                V
+current      ┌─────┬─────┐
+state set ─&gt; │ ... │ ... │
+             └─────┴─────┘
+</code></pre>
+
+<p>Nothing to add, let's try the next Earley item:</p>
+
+<pre><code>                   current
+                    item
+                      │
+                      V
+current      ┌─────┬─────┐
+state set ─&gt; │ ... │  !  │
+             └─────┴─────┘
+</code></pre>
+
+<p>Ah, apparently, we need to add an item:</p>
+
+<pre><code>                   current
+                    item
+                      │     ┌──The item we just added
+                      V     V
+current      ┌─────┬─────┬─────┐
+state set ─&gt; │ ... │  !  │ ... │
+             └─────┴─────┴─────┘
+</code></pre>
+
+<p>Done, now let's go to the next item (there wasn't one, but now there
+is).</p>
+
+<pre><code>                          current
+                           item
+                            │
+                            V
+current      ┌─────┬─────┬─────┐
+state set ─&gt; │ ... │  !  │ !!! │
+             └─────┴─────┴─────┘
+</code></pre>
+
+<p>Ah, this one's different.  We need to add an item to the <em>next</em> state
+set!  We create this state set if necessary, then add an Earley item
+to it.</p>
+
+<pre><code>                          current
+                           item
+                            │
+                            V
+current      ┌─────┬─────┬─────┐
+state set ─&gt; │ ... │  !  │ !!! │
+             └─────┴─────┴─────┘
+
+next         ┌─────┐
+state set ─&gt; │ ... │
+             └─────┘
+                ^
+                └──The item we just added
+</code></pre>
+
+<p>We have finished processing the current state, we can now process the
+next one (there wasn't one originally, but now there is), and so on.</p>
+
+<h3>Outer loop</h3>
+
+<p>The outer loop works similarly: Run the inner loop over <code>S(0)</code>.
+Repeat the process with the next state set (which hopefully has just
+been created), and so on until there are no more state sets to
+process.  Given a grammar and an input, we will start with something
+like this:</p>
+
+<pre><code>   ┌──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┐
+   │  1   │  +   │  (   │  2   │  *   │  3   │  -   │  4   │  )   │
+   └──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┘
+┌──────┐
+│ S(0) │
+└──┬───┘
+   │
+   V
+┌─────┬─────┐
+│ ... │ ... │
+└─────┴─────┘
+</code></pre>
+
+<p>Then we run the inner loop over <code>S(0)</code>, generating some more Earley
+items and one state set in the process:</p>
+
+<pre><code>   ┌──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┐
+   │  1   │  +   │  (   │  2   │  *   │  3   │  -   │  4   │  )   │
+   └──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┘
+┌──────┬──────┐
+│ S(0) │ S(1) │
+└──┬───┴──┬───┘
+   │      │
+   │      V
+   │   ┌─────┐
+   │   │ ... │
+   V   └─────┘
+┌─────┬─────┬─────┐
+│ ... │ ... │ ... │
+└─────┴─────┴─────┘
+</code></pre>
+
+<p>Now we run the inner loop over <code>S(1)</code>, and generate some more data:</p>
+
+<pre><code>   ┌──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┐
+   │  1   │  +   │  (   │  2   │  *   │  3   │  -   │  4   │  )   │
+   └──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┘
+┌──────┬──────┬──────┐
+│ S(0) │ S(1) │ S(2) │
+└──┬───┴──┬───┴──┬───┘
+   │      │      │
+   │      │      V
+   │      │   ┌─────┬─────┬─────┬─────┐
+   │      │   │ ... │ ... │ ... │ ... │
+   │      V   └─────┴─────┴─────┴─────┘
+   │   ┌─────┬─────┬─────┐
+   │   │ ... │ ... │ ... │
+   V   └─────┴─────┴─────┘
+┌─────┬─────┬─────┐
+│ ... │ ... │ ... │
+└─────┴─────┴─────┘
+</code></pre>
+
+<p>And so on until we can't generate more state sets (either because we
+reached the end of the input, or because the input "stopped making
+sense").  I didn't represent all state sets, but you get the idea:</p>
+
+<pre><code>   ┌──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┐
+   │  1   │  +   │  (   │  2   │  *   │  3   │  -   │  4   │  )   │
+   └──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┘
+┌──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┐
+│ S(0) │ S(1) │ S(2) │ S(3) │ S(4) │ S(5) │ S(6) │ S(7) │ S(8) │ S(9) │
+└──┬───┴──┬───┴──┬───┴──┬───┴──┬───┴──┬───┴──┬───┴──┬───┴──┬───┴──┬───┘
+   │      │      │      │      │      │      │      │      │      │
+   │      │      │      V      V      V      V      V      V      V
+   │      │      │     ...    ...    ...    ...    ...    ...    ...
+   │      │      V
+   │      │   ┌─────┬─────┬─────┬─────┐
+   │      │   │ ... │ ... │ ... │ ... │
+   │      V   └─────┴─────┴─────┴─────┘
+   │   ┌─────┬─────┬─────┐
+   │   │ ... │ ... │ ... │
+   V   └─────┴─────┴─────┘
+┌─────┬─────┬─────┐
+│ ... │ ... │ ... │
+└─────┴─────┴─────┘
+</code></pre>
+
+<h2>Prediction, Scan, and Completion</h2>
+
+<p>There are three specific ways of adding new Earley items to our
+data.  Which way we choose depends on the item we are currently
+examining.</p>
+
+<ul>
+<li><strong>Prediction</strong>.  The symbol at the right of the fat dot is
+non-terminal.  We add the the corresponding rules to the current
+state set.</li>
+<li><p><strong>Scan</strong>.  The symbol at the right of the fat dot is terminal.  We
+check if the input matches this symbol.  If it does, we add this
+item (advanced one step) to the <em>next</em> state set.</p></li>
+<li><p><strong>Completion</strong>.  There is nothing at the right of the fat dot.  This
+means we have a successful partial parse.  We look for the parent
+items, and add them (advanced one step) to this state set.</p></li>
+</ul>
+
+<h3>Prediction</h3>
+
+<p>Let's go back to our initialised data.  We must now examine the first
+Earley Item.</p>
+
+<pre><code>   ┌──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┐
+   │  1   │  +   │  (   │  2   │  *   │  3   │  -   │  4   │  )   │
+   └──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┘
+┌──────┐
+│ S(0) │
+└──┬───┘
+   │
+   V
+┌───────────────────────────────┐
+│ Sum -&gt; • Sum [+-] Product (0) │ &lt;─ prediction
+├───────────────────────────────┤
+│ Sum -&gt; • Product          (0) │
+└───────────────────────────────┘
+</code></pre>
+
+<p>At the right of the fat dot, there is <code>Sum</code>, a non-terminal symbol.
+We must perform a prediction.  Why?  Because we're trying to parse the
+grammar rule embedded in this item.  What's just after the fat dot?  A
+<code>Sum</code>.  Does this <code>Sum</code> actually begins by a <code>Sum</code>?  Well, we have to
+try if we want to know.  So we look up the Grammar, and see 2 rules
+named "Sum":</p>
+
+<pre><code>Sum -&gt; Sum [+-] Product
+Sum -&gt; Product
+</code></pre>
+
+<p>This means we must add the following two items to <code>S(0)</code>:</p>
+
+<pre><code>Sum -&gt; • Sum [+-] Product (0)
+Sum -&gt; • Product          (0)
+       │                   │
+       │                   └ The item is predicted in S(0), so
+       │                     we set the starting point at (0).
+       │
+       └ We put the dot at the beginning of the rule.
+</code></pre>
+
+<p>Now we can add those items at the end of <code>S(0)</code>.</p>
+
+<pre><code>   ┌──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┐
+   │  1   │  +   │  (   │  2   │  *   │  3   │  -   │  4   │  )   │
+   └──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┘
+┌──────┐
+│ S(0) │
+└──┬───┘
+   │
+   V
+┌───────────────────────────────┐
+│ Sum -&gt; • Sum [+-] Product (0) │ &lt;─ prediction
+├───────────────────────────────┤
+│ Sum -&gt; • Product          (0) │
+├───────────────────────────────┤─┐
+┆ Sum -&gt; • Sum [+-] Product (0) ┆ │
+├┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┤ ├─&gt; These 2 are redundant
+┆ Sum -&gt; • Product          (0) ┆ │
+└┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┘─┘
+</code></pre>
+
+<p>Now we have a problem: this redundancy will drop us in an infinite
+loop: since the first symbol of a rule named "Sum" is <em>also</em> "Sum", we
+will keep predicting sums until we run out of memory.  This is a
+classic problem with most top-down parsers, and the reason why they
+can't handle left-recursive grammars.</p>
+
+<p>So we take one little precaution: <em>no duplicate</em>.  The same items give
+the same results anyway, so why waste work?  That way we avoid
+infinite loops —all of them.  So don't worry about left-recursive
+grammars, right-recursive grammars, magical grammars… they Just Work™.</p>
+
+<p><em>(Okay, that was a lie.  Some grammars still won't work.  We need
+another little precaution, which cannot be explained at this point.)</em></p>
+
+<p>With this in mind, we go examine the next Earley item.  We must still
+perform a prediction, this time over <code>Product</code>.  (Basically, we're
+trying to see if this <code>Sum</code> begins with a <code>Product</code>.)</p>
+
+<pre><code>   ┌──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┐
+   │  1   │  +   │  (   │  2   │  *   │  3   │  -   │  4   │  )   │
+   └──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┘
+┌──────┐
+│ S(0) │
+└──┬───┘
+   │
+   V
+┌───────────────────────────────────────┐
+│ Sum     -&gt; • Sum     [+-] Product (0) │
+├───────────────────────────────────────┤
+│ Sum     -&gt; • Product              (0) │ &lt;─ prediction
+├───────────────────────────────────────┤─┐
+┆ Product -&gt; • Product [*/] Factor  (0) ┆ │
+├┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┤ ├─&gt; These 2 are new
+┆ Product -&gt; • Factor               (0) ┆ │
+└┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┘─┘
+</code></pre>
+
+<p>Since those are not duplicates we actually add them to <code>S(0)</code>.</p>
+
+<h3>Scan</h3>
+
+<p>We keep looping over the items, predicting everything until we reach
+this Earley item:</p>
+
+<pre><code>   ┌──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┐
+   │  1   │  +   │  (   │  2   │  *   │  3   │  -   │  4   │  )   │
+   └──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┘
+┌──────┐
+│ S(0) │
+└──┬───┘
+   │
+   V
+┆ ...                                   ┆
+├───────────────────────────────────────┤
+│ Factor  -&gt; • '(' Sum ')'          (0) │ &lt;─ scan
+├───────────────────────────────────────┤
+┆ ...                                   ┆
+</code></pre>
+
+<p>Now we can't predict any more: at the right of the fat dot, there is a
+<em>terminal</em> symbol.  How do we <em>try</em> a terminal symbol?  We scan it.
+First we see if the terminal symbol (an open parens) applies to the
+current character (the digit '1').  Since '1' is not an open parens,
+the scan fails.  We continue the loop without doing anything.</p>
+
+<p>The next scan looks like this:</p>
+
+<pre><code>   ┌──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┐
+   │  1   │  +   │  (   │  2   │  *   │  3   │  -   │  4   │  )   │
+   └──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┘
+┌──────┐
+│ S(0) │
+└──┬───┘
+   │
+   V
+┆ ...                                   ┆
+├───────────────────────────────────────┤
+│ Number  -&gt; • [0-9] Number         (0) │ &lt;─ scan
+├───────────────────────────────────────┤
+┆ ...                                   ┆
+</code></pre>
+
+<p>Here, the non-terminal symbol at the right of the fat dot is <code>[0-9]</code>,
+and the digit '1' does match that terminal symbol.  Test successful!
+So, we copy the Earley item we're examining over to the next state
+set, with a slight modification:</p>
+
+<pre><code>   ┌──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┐
+   │  1   │  +   │  (   │  2   │  *   │  3   │  -   │  4   │  )   │
+   └──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┘
+┌──────┬┄┄┄┄┄┄┐
+│ S(0) │ S(1) ┆
+└──┬───┴┄┄┄┄┄┄┘
+   │      │
+   │      V
+   │    ┌┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┐
+   │    ┆ Number -&gt; [0-9] • Number (0) ┆
+   │    └┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄│┄┄┄┄┄┄┄┄┄│┄┄┘
+   │                      │         │
+   │                      │         └ The starting point
+   │                      │           is unchanged.
+   │                      │
+   │                      └ The fat dot is shifted
+   V                        one step to the right.
+┆ ...                                   ┆
+├───────────────────────────────────────┤
+│ Number  -&gt; • [0-9] Number         (0) │ &lt;─ scan
+├───────────────────────────────────────┤
+┆ ...                                   ┆
+</code></pre>
+
+<p>This time, we've done some significant work: we have tried many
+things, and this is our first success!  At last, we managed to move a
+fat dot one step to the right.  Now this is not a <em>confirmed</em> success,
+since the fat dot is not completely off to the right yet.  But that's
+a start.</p>
+
+<h3>Completion</h3>
+
+<p>We continue our main loop, finish <code>S(0)</code>, and process <code>S(1)</code>.  At some
+point, we get to this:</p>
+
+<pre><code>   ┌──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┐
+   │  1   │  +   │  (   │  2   │  *   │  3   │  -   │  4   │  )   │
+   └──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┘
+┌──────┬──────┐
+│ S(0) │ S(1) │
+└──┬───┴──────┘
+   │      │
+   │      V
+   │    ┆ ...                                  ┆
+   │    ├──────────────────────────────────────┤
+   │    │ Number -&gt; [0-9] •                (0) │ &lt;─ completion
+   │    ├──────────────────────────────────────┤
+   │    ┆ ...                                  ┆
+   V
+┌───────────────────────────────────────┐
+│ ...                                   │
+├───────────────────────────────────────┤
+┆ ...                                   ┆
+</code></pre>
+
+<p>Here there is no symbol at the right side of the fat dot.  At this
+point, things get <em>real</em> interesting: we have a successful partial
+parse.  An actual, confirmed success: between the starting point of
+the item (0), and its current position (1), the string <code>"1"</code> is a
+<code>Number</code>.</p>
+
+<p>We do not stop there however: This <code>Number</code> may be a fluke, but it
+may also be part of something bigger.  Actually, Earley's algorithm
+pretty much <em>guarantees</em> it will be part of something bigger.  This
+item doesn't come from nowhere: there's a whole chain of predictions,
+scans, and completions to get there.</p>
+
+<p>Imagine we have an item like this ('a', 'b', and 'c' are symbols, and
+'i' is an integer):</p>
+
+<pre><code>Rule -&gt; a b c •  (i)
+</code></pre>
+
+<p>The fact that this item even <em>exist</em> means the following items also
+exist somewhere:</p>
+
+<pre><code>Foo -&gt;   a   b • c  (i)
+Foo -&gt;   a • b   c  (i)
+Foo -&gt; • a   b   c  (i)
+</code></pre>
+
+<p>And the last of them can only exist in <code>S(i)</code>: the state set where it
+was predicted.  We're not interested in those items however.  What we
+<em>really</em> want is the items that might have triggered the original
+prediction.  <em>Might</em> have.  Only one item actually triggered the
+original prediction, but there's often more than one path, and we want
+to capture them all.  Anyway, those rules are the rules in <code>S(i)</code> that
+look like this:</p>
+
+<pre><code>Bar -&gt; a b • Foo c d  (j)
+</code></pre>
+
+<p>That is, any rule in <code>S(i)</code> that has the rule <code>Foo</code> right next to the
+fat dot.  <em>Those</em> are the "something" bigger <code>Foo</code> is a part of.  Now
+the purpose of starting points should be obvious.  With them, we can
+jump straight to the interesting state set, and retrieve the sets we
+want.</p>
+
+<p>Enough with the side quest.  We were triggering a completion with this
+item:</p>
+
+<pre><code>┆ ...                                  ┆
+├──────────────────────────────────────┤
+┆ Number -&gt; [0-9] •                (0) ┆
+├──────────────────────────────────────┤
+┆ ...                                  ┆
+</code></pre>
+
+<p>So, we search <code>S(0)</code> for any item that has <code>Number</code> right next to the
+dot:</p>
+
+<pre><code>    ┌─────────┤we must search here├─────────┐
+    │                                       │
+┌───V──┬──────┐                             │
+│ S(0) │ S(1) │                             │
+└──┬───┴──────┘                             │
+   │      │                                 │
+   │      V                                 │
+   │    ┆ ...                               │  ┆
+   │    ├───────────────────────────────────│──┤
+   │    │ Number -&gt; [0-9] •                (0) │ &lt;─ completion
+   │    ├──────────────────────────────────────┤
+   │    ┆ ...                                  ┆
+   V
+┌───────────────────────────────────────┐
+│ Sum     -&gt; • Sum     [+-] Product (0) │ Nope
+├───────────────────────────────────────┤
+│ Sum     -&gt; • Product              (0) │ Nope
+├───────────────────────────────────────┤
+│ Product -&gt; • Product [*/] Factor  (0) │ Nope
+├───────────────────────────────────────┤
+│ Product -&gt; • Factor               (0) │ Nope
+├───────────────────────────────────────┤
+│ Factor  -&gt; • '(' Sum ')'          (0) │ Nope
+├───────────────────────────────────────┤
+│ Factor  -&gt; • Number               (0) │ FOUND ONE!
+├───────────────────────────────────────┤
+│ Number  -&gt; • [0-9] Number         (0) │ Nope
+├───────────────────────────────────────┤
+│ Number  -&gt; • [0-9]                (0) │ Nope
+└───────────────────────────────────────┘
+</code></pre>
+
+<p>Now we just have to complete the items we have found.  This is very
+similar to a successful scan.  The only difference is, we moved the
+fat dot over a <em>non-terminal</em> symbol:</p>
+
+<pre><code>   ┌──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┐
+   │  1   │  +   │  (   │  2   │  *   │  3   │  -   │  4   │  )   │
+   └──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┘
+┌──────┬──────┐
+│ S(0) │ S(1) │
+└──┬───┴──────┘
+   │      │
+   │      V
+   │    ┌──────────────────────────────────────┐
+   │    │ Number -&gt; [0-9] • Number         (0) │
+   │    ├──────────────────────────────────────┤
+   │    │ Number -&gt; [0-9] •                (0) │ &lt;─ completion
+   │    ├──────────────────────────────────────┤    trigger
+   │    │ Number -&gt; • [0-9] Number         (1) │
+   │    ├──────────────────────────────────────┤
+   │    │ Number -&gt; • [0-9]                (1) │
+   │    ├──────────────────────────────────────┤
+   │    ┆ Factor  -&gt; Number •              (0) ┆ completed item
+   │    └┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄│┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄│┄┄┘
+   │                        │               │
+   │                        │               └ The starting point
+   │                        │                 is unchanged.
+   │                        │
+   │                        └ The fat dot is shifted
+   V                          one step to the right.
+┌───────────────────────────────────────┐
+│ Sum     -&gt; • Sum     [+-] Product (0) │
+├───────────────────────────────────────┤
+│ Sum     -&gt; • Product              (0) │
+├───────────────────────────────────────┤
+│ Product -&gt; • Product [*/] Factor  (0) │
+├───────────────────────────────────────┤
+│ Product -&gt; • Factor               (0) │
+├───────────────────────────────────────┤
+│ Factor  -&gt; • '(' Sum ')'          (0) │
+├───────────────────────────────────────┤
+│ Factor  -&gt; • Number               (0) │ Item to complete
+├───────────────────────────────────────┤
+│ Number  -&gt; • [0-9] Number         (0) │
+├───────────────────────────────────────┤
+│ Number  -&gt; • [0-9]                (0) │
+└───────────────────────────────────────┘
+</code></pre>
+
+<p>Note that there may be more than one item to complete.  And in some
+cases, like the starting rule, there may be no item at all to
+complete.  Be careful with those edge cases.</p>
+
+<h2>After the end</h2>
+
+<p>Eventually, the algorithm will stop, and you will end up with a whole
+slew of Earley items.  for the input <code>1+(2*3-4)</code>, it will be those:</p>
+
+<pre><code>=== 0 ===
+Sum     -&gt; • Sum [+-] Product     (0)
+Sum     -&gt; • Product              (0)
+Product -&gt; • Product [*/] Factor  (0)
+Product -&gt; • Factor               (0)
+Factor  -&gt; • '(' Sum ')'          (0)
+Factor  -&gt; • Number               (0)
+Number  -&gt; • [0-9] Number         (0)
+Number  -&gt; • [0-9]                (0)
+
+=== 1 ===
+Number  -&gt; [0-9] • Number         (0)
+Number  -&gt; [0-9] •                (0)
+Number  -&gt; • [0-9] Number         (1)
+Number  -&gt; • [0-9]                (1)
+Factor  -&gt; Number •               (0)
+Product -&gt; Factor •               (0)
+Sum     -&gt; Product •              (0)
+Product -&gt; Product • [*/] Factor  (0)
+Sum     -&gt; Sum • [+-] Product     (0)
+
+=== 2 ===
+Sum     -&gt; Sum [+-] • Product     (0)
+Product -&gt; • Product [*/] Factor  (2)
+Product -&gt; • Factor               (2)
+Factor  -&gt; • '(' Sum ')'          (2)
+Factor  -&gt; • Number               (2)
+Number  -&gt; • [0-9] Number         (2)
+Number  -&gt; • [0-9]                (2)
+
+=== 3 ===
+Factor  -&gt; '(' • Sum ')'          (2)
+Sum     -&gt; • Sum [+-] Product     (3)
+Sum     -&gt; • Product              (3)
+Product -&gt; • Product [*/] Factor  (3)
+Product -&gt; • Factor               (3)
+Factor  -&gt; • '(' Sum ')'          (3)
+Factor  -&gt; • Number               (3)
+Number  -&gt; • [0-9] Number         (3)
+Number  -&gt; • [0-9]                (3)
+
+=== 4 ===
+Number  -&gt; [0-9] • Number         (3)
+Number  -&gt; [0-9] •                (3)
+Number  -&gt; • [0-9] Number         (4)
+Number  -&gt; • [0-9]                (4)
+Factor  -&gt; Number •               (3)
+Product -&gt; Factor •               (3)
+Sum     -&gt; Product •              (3)
+Product -&gt; Product • [*/] Factor  (3)
+Factor  -&gt; '(' Sum • ')'          (2)
+Sum     -&gt; Sum • [+-] Product     (3)
+
+=== 5 ===
+Product -&gt; Product [*/] • Factor  (3)
+Factor  -&gt; • '(' Sum ')'          (5)
+Factor  -&gt; • Number               (5)
+Number  -&gt; • [0-9] Number         (5)
+Number  -&gt; • [0-9]                (5)
+
+=== 6 ===
+Number  -&gt; [0-9] • Number         (5)
+Number  -&gt; [0-9] •                (5)
+Number  -&gt; • [0-9] Number         (6)
+Number  -&gt; • [0-9]                (6)
+Factor  -&gt; Number •               (5)
+Product -&gt; Product [*/] Factor •  (3)
+Sum     -&gt; Product •              (3)
+Product -&gt; Product • [*/] Factor  (3)
+Factor  -&gt; '(' Sum • ')'          (2)
+Sum     -&gt; Sum • [+-] Product     (3)
+
+=== 7 ===
+Sum     -&gt; Sum [+-] • Product     (3)
+Product -&gt; • Product [*/] Factor  (7)
+Product -&gt; • Factor               (7)
+Factor  -&gt; • '(' Sum ')'          (7)
+Factor  -&gt; • Number               (7)
+Number  -&gt; • [0-9] Number         (7)
+Number  -&gt; • [0-9]                (7)
+
+=== 8 ===
+Number  -&gt; [0-9] • Number         (7)
+Number  -&gt; [0-9] •                (7)
+Number  -&gt; • [0-9] Number         (8)
+Number  -&gt; • [0-9]                (8)
+Factor  -&gt; Number •               (7)
+Product -&gt; Factor •               (7)
+Sum     -&gt; Sum [+-] Product •     (3)
+Product -&gt; Product • [*/] Factor  (7)
+Factor  -&gt; '(' Sum • ')'          (2)
+Sum     -&gt; Sum • [+-] Product     (3)
+
+=== 9 ===
+Factor  -&gt; '(' Sum ')' •          (2)
+Product -&gt; Factor •               (2)
+Sum     -&gt; Sum [+-] Product •     (0)
+Product -&gt; Product • [*/] Factor  (2)
+Sum     -&gt; Sum • [+-] Product     (0)
+</code></pre>
+
+<p>Quite a mess.  Now the big question is, have we made it?  To know
+that, we must look at the last state set:</p>
+
+<pre><code>=== 9 ===
+Factor  -&gt; '(' Sum ')' •          (2)
+Product -&gt; Factor •               (2)
+Sum     -&gt; Sum [+-] Product •     (0)
+Product -&gt; Product • [*/] Factor  (2)
+Sum     -&gt; Sum • [+-] Product     (0)
+</code></pre>
+
+<p>First this is the set number 9 (or the 10th set).  The input has
+precisely 9 characters.  So, first good news, the whole input made
+sense.</p>
+
+<p>This is not enough however.  We are looking for items that:</p>
+
+<ul>
+<li>are complete (the fat dot is at the end),</li>
+<li>have started at the beginning (state set 0),</li>
+<li>have the same name that has been chosen at the beginning ("Sum").</li>
+</ul>
+
+<p>There is one such item in S(9):</p>
+
+<pre><code>Sum -&gt; Sum [+-] Product •  (0)
+</code></pre>
+
+<p>We Win!</p>
+
+<h3>Failure modes</h3>
+
+<p>There are 2 ways to fail:</p>
+
+<ul>
+<li><p>We may fail to parse the whole input.  This is because an invalid
+token caused it to stop making sense at this point.  This is what
+happens when you try "<code>1+%</code>": the parse stops at the second character,
+fails at the third, then stops.</p></li>
+<li><p>We may parse the whole input, but fail to make a complete parse out
+of it.  This is what happens when you try "<code>1+</code>".  This is a valid
+beginning of a <code>Sum</code>, but the last part is missing, and we can't
+finish the parse.</p></li>
+</ul>
+
+<p>In both cases, you get the following Earley items:</p>
+
+<pre><code>=== 0 ===
+Sum     -&gt; • Sum [+-] Product     (0)
+Sum     -&gt; • Product              (0)
+Product -&gt; • Product [*/] Factor  (0)
+Product -&gt; • Factor               (0)
+Factor  -&gt; • '(' Sum ')'          (0)
+Factor  -&gt; • Number               (0)
+Number  -&gt; • [0-9] Number         (0)
+Number  -&gt; • [0-9]                (0)
+
+=== 1 ===
+Number  -&gt; [0-9] • Number         (0)
+Number  -&gt; [0-9] •                (0)
+Number  -&gt; • [0-9] Number         (1)
+Number  -&gt; • [0-9]                (1)
+Factor  -&gt; Number •               (0)
+Product -&gt; Factor •               (0)
+Sum     -&gt; Product •              (0)
+Product -&gt; Product • [*/] Factor  (0)
+Sum     -&gt; Sum • [+-] Product     (0)
+
+=== 2 ===
+Sum     -&gt; Sum [+-] • Product     (0)
+Product -&gt; • Product [*/] Factor  (2)
+Product -&gt; • Factor               (2)
+Factor  -&gt; • '(' Sum ')'          (2)
+Factor  -&gt; • Number               (2)
+Number  -&gt; • [0-9] Number         (2)
+Number  -&gt; • [0-9]                (2)
+</code></pre>
+
+<p><em>(We get the same Earley items because this grammar makes no
+ difference between an input that stops making sense, and an input
+ that just stops. To make that difference, we need a rule that uses an
+ "end of input" token explicitly.)</em></p>
+
+<p>Note that in both examples, there <em>is</em> a valid parse: the number <code>1</code>,
+which is a <code>Sum</code> by itself.  This is evidenced by the presence of this
+Earley item in <code>S(1)</code>:</p>
+
+<pre><code>Sum -&gt; Product •  (0)
+</code></pre>
+
+<p>I say this because in some cases, you just want to parse a header.  Of
+course the input will stop making sense at some point.</p>
+
+<h2>Let's do this!</h2>
+
+<p>You should now be able to implement a Lua recogniser.  It will work
+for any grammar, except for <em>one important limitation</em>: It handles
+empty rules badly.  We'll correct this bug <a href="empty-rules">next time</a>.</p>
+
+<p>In the mean time, here is a <a href="recogniser.lua">recogniser in Lua</a>.  To
+use it, just run the lua interpreter on it in the command line, like
+this:</p>
+
+<pre><code>$ lua recogniser.lua
+</code></pre>
+
+<p>It has been tested with lua 5.2.3 on a Debian machine.  It should work
+on 5.1 as well, on any machine.</p>
+
+<p>If you don't know Lua, don't worry, it mostly looks like pseudocode.
+Use it at your own peril though: there is still that bug about empty
+rules.</p>
+
+<h2>Source code</h2>
+
+<p>You should be able to read it even if you don't know Lua (I did my
+best to avoid Lua specific idioms). The only tricky bit lie in the
+<a href="http://lua-users.org/wiki/TablesTutorial">tables</a>.</p>
+
+<p>First, an example grammar:</p>
+
+<pre><code>local Grammar = {
+   start_rule_name = 'Sum',
+   { name = 'Sum'    , 'Sum'      , class('+-'), 'Product'},
+   { name = 'Sum'    , 'Product'  ,                       },
+   { name = 'Product', 'Product'  , class('*/'), 'Factor' },
+   { name = 'Product', 'Factor'   ,                       },
+   { name = 'Factor' , char('(')  , 'Sum', char(')')      },
+   { name = 'Factor' , 'Number'                           },
+   { name = 'Number' , range('09'), 'Number'              },
+   { name = 'Number' , range('09'),                       },
+}
+</code></pre>
+
+<p>then how to use it:</p>
+
+<pre><code>local input = "1+(2*3+4)"
+local S     = build_items(Grammar, input)
+print_S(S, Grammar)              -- print all the internal state
+diagnose(S, Grammar, input)      -- tell if the input is OK or not
+</code></pre>
+
+<p>Now the main loop:</p>
+
+<pre><code>local function build_items(grammar, input)
+   -- Earley sets
+   local S = {{}}
+   -- put start item(s) in S[1]
+   for i = 1, #grammar do
+      if grammar[i].name == grammar.start_rule_name then
+         unsafe_append(S[1], { rule  = i,
+                               start = 1,
+                               next  = 1 })
+      end
+   end
+   -- populate the rest of S[i]
+   local i = 1
+   while i &lt;= #S do
+      local j = 1
+      while j &lt;= #S[i] do
+         local symbol = next_symbol(grammar, S[i][j])
+         if     type(symbol) == "nil"      then complete(S, i, j, grammar)
+         elseif type(symbol) == "function" then scan    (S, i, j, symbol, input)
+         elseif type(symbol) == "string"   then predict (S, i,    symbol, grammar)
+         else error("illegal rule")
+         end
+         j = j + 1
+      end
+      i = i + 1
+   end
+   return S
+end
+</code></pre>
+
+<p>The prediction step:</p>
+
+<pre><code>local function predict(S, i, symbol, grammar)
+   for rule_index, rule in ipairs(grammar) do
+      if rule.name == symbol then
+         append(S[i], { rule  = rule_index,
+                        next  = 1 ,
+                        start = i })
+      end
+   end
+end
+</code></pre>
+
+<p>The scan step:</p>
+
+<pre><code>local function scan(S, i, j, symbol, input)
+   local item = S[i][j]
+   if symbol(input, i) then -- terminal symbols are predicates
+      if S[i+1] == nil then S[i+1]  = {} end
+      unsafe_append(S[i+1], { rule  = item.rule,
+                              next  = item.next + 1,
+                              start = item.start })
+   end
+end
+</code></pre>
+
+<p>The completion step:</p>
+
+<pre><code>local function complete(S, i, j, grammar)
+   local item = S[i][j]
+   for old_item_index, old_item in ipairs(S[item.start]) do
+      if next_symbol(grammar, old_item) == name(grammar, item) then
+         append(S[i], { rule  = old_item.rule,
+                        next  = old_item.next + 1,
+                        start = old_item.start })
+      end
+   end
+end
+</code></pre>
+
+<p>Some utility functions:</p>
+
+<pre><code>-- next element in the rule of this item
+local function next_symbol(grammar, item)
+   return grammar[item.rule][item.next]
+end
+
+-- gets the name of the rule pointed by the item
+local function name(grammar, item)
+   return grammar[item.rule].name
+end
+
+-- compares two items for equality (needed for safe append)
+local function equal(item1, item2)
+   return item1.rule  == item2.rule
+      and item1.start == item2.start
+      and item1.next  == item2.next
+end
+
+-- Adds an item at the end of the Earley set
+local function unsafe_append(set, item)
+   set[#set+1] = item
+end
+
+-- Adds an item at the end of the Earley set, **unless already present**
+local function append(set, item)
+   for i = 1, #set do
+      if equal(item, set[i]) then
+         return
+      end
+   end
+   unsafe_append(set, item) -- the item wasn't already there, we add it
+end
+</code></pre>
+
+<p>That should be enough.  In any case, the
+<a href="recogniser.lua">full source code</a> is still available.</p>
+
+ </article>
+
+    <nav>
+      <a href="/">Home</a>
+      
+<ul>
+<li>
+<a href="/articles/">
+My essays/
+</a>
+
+</li>
+<li>
+<a href="/projects/">
+Projects/
+</a>
+
+</li>
+<li>
+<a href="/tutorials/">
+Tutorials/
+</a>
+<ul>
+<li>
+<a href="/tutorials/poly1305-design">
+The design of Poly1305
+</a>
+
+</li>
+<li>
+<a href="/tutorials/chacha20-design">
+The design of Chacha20
+</a>
+
+</li>
+<li>
+<a href="/tutorials/monty-hall">
+Monty Hall: the Complete and Definitive Solution
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/">
+Earley Parsing Explained/
+</a>
+<ul>
+<li>
+<a href="/tutorials/earley-parsing/what-and-why">
+What is Earley parsing, and why you should care?
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/chart-parsing">
+Chart Parsing
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/recogniser">
+The Recogniser
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/empty-rules">
+Empty Rules
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/right-recursion">
+Optimising Right Recursion
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/parser">
+The Parser
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/semantic-actions">
+Semantic Actions
+</a>
+
+</li>
+</ul>
+</li>
+<li>
+<a href="/tutorials/avoid-assignment">
+How to avoid the assignment statement
+</a>
+
+</li>
+<li>
+<a href="/tutorials/from-imperative-to-functional">
+From Imperative to Functional: how to make the leap.
+</a>
+
+</li>
+<li>
+<a href="/tutorials/ultimate-css-layout">
+My ultimate CSS layout
+</a>
+
+</li>
+</ul>
+</li>
+<li>
+<a href="/contact">
+Contact me
+</a>
+
+</li>
+</ul>
+
+    </nav>
+
+    <footer>
+      Contact, suggestions: Send me an email at
+      <a href="mailto:l@loup-vaillant.fr">l@loup-vaillant.fr</a><br>
+      <a href="/updates">Atom feed</a><br>
+      Built with <a href="/projects/ussm">USSM</a>
+    </footer>
+  
+
+
+</body></html>Ytext/htmlUUTF-8_;http://loup-vaillant.fr/tutorials/earley-parsing/recogniserP��_WebResourceResponseOqbplist00�noX$versionX$objectsY$archiverT$top ���!#)*0123OPQRSTUVWXYZ[\]^_`abcdeiU$null�	
+ !"R$6S$10R$2R$7R$3S$11R$8V$classR$4R$9R$0R$5R$1�	��� � ����$%'(WNS.base[NS.relative� ��_!http://loup-vaillant.fr/style.css�+,-.Z$classnameX$classesUNSURL�-/XNSObject#A�j!V��� ��456BNWNS.keysZNS.objects�789:;<=>?@A�	�
+����������CEFGHIJKLM������������VServer\Content-TypeTVary]Last-ModifiedTEtag]Accept-RangesTDate_Content-Encoding^Content-LengthZKeep-AliveZConnection_Apache/2.2.16 (Debian)Xtext/css_Accept-Encoding_Mon, 29 Jun 2015 09:44:54 GMT_"32ad-60d-519a4f11b9180"Ubytes_Tue, 28 Feb 2017 21:32:33 GMTTgzipS548_timeout=15, max=100ZKeep-Alive�+,fg_NSMutableDictionary�fh/\NSDictionary�+,jk_NSHTTPURLResponse�lm/_NSHTTPURLResponse]NSURLResponse_NSKeyedArchiver�pq_WebResourceResponse�    # - 2 7 [ a |  � � � � � � � � � � � � � � � � � � � � � � � � � � � � � � � &)2;=?FNYegikmoqsuwy{��������������������� /8Jj����������2@RUk             r              mO/* reset */
+header, nav, article, footer, body, html, pre code
+{ display:block; margin:0; color:black; }
+
+/* colors */
+html, body { background-color:#fff8f0; }
+footer     { background-color:#f0e4d0; }
+pre code   { background-color:#f0e4d0; }
+
+/* round corners, margins */
+html     { margin:1.5em }
+footer   { border-radius        : 1.5em;
+           -moz-border-radius   : 1.5em;
+           -webkit-border-radius: 1.5em;
+           margin-bottom: 1.5em; padding: 1em; }
+pre code { border-radius        : 1em;
+           -moz-border-radius   : 1em;
+           -webkit-border-radius: 1em;
+           margin: 1em 0 1em 0;
+           padding:0.5em;}
+nav ul   { margin:  0;
+           padding: 0 0 0 1em; }
+header, nav, article { margin-bottom: 1.5em;
+                       padding: 1em; }
+
+/* style */
+a:visited         { color: #822; }
+a:hover           { color: #f50; }
+code              { font-size: 120%; }
+nav a             { text-decoration: none; }
+nav ul, footer    { font-size: 0.83em; }
+nav ul ul         { font-size: 1em; }
+header blockquote { font-style: italic; } /* slogan */
+header #logo      { float: right;
+                    margin-bottom: 2em; }
+h1                { font-size: 180% }
+table tr td       { text-align: center;
+                    padding: 5px; }
+table tr th       { text-align: center;
+                    padding: 5px; }
+
+/* layout */
+body    { width: 63em; margin: auto; }
+article { float:left; margin-left:  18em; width: 42em;   }
+nav     { float:left; margin-left: -61em; width: 14.5em; }
+footer  { clear: both; }
+Xtext/css_!http://loup-vaillant.fr/style.css�O%bplist00�fgX$versionX$objectsY$archiverT$top ���#)*0123KLMNOPQRSTUVWXYZ[\]aU$null�	
+ !"R$6S$10R$2R$7R$3S$11R$8V$classR$4R$9R$0R$5R$1�	��� �����$%'(WNS.base[NS.relative� ��_#http://loup-vaillant.fr/penrose.png�+,-.Z$classnameX$classesUNSURL�-/XNSObject#A�j!V��W ��456@JWNS.keysZNS.objects�789:;<=>?�	�
+��������ACDEFGHI����������VServer\Content-TypeTEtag]Last-ModifiedTDate]Accept-Ranges^Content-LengthZKeep-AliveZConnection_Apache/2.2.16 (Debian)Yimage/png_"22e3-f86-4ba5de191db80"_Sat, 03 Mar 2012 22:04:46 GMT_Fri, 03 Mar 2017 21:54:23 GMTUbytesT3974_timeout=15, max=98ZKeep-Alive�+,^__NSMutableDictionary�^`/\NSDictionary�+,bc_NSHTTPURLResponse�de/_NSHTTPURLResponse]NSURLResponse_NSKeyedArchiver�hi_WebResourceResponse�    # - 2 7 W ] x {  � � � � � � � � � � � � � � � � � � � � � � � � � � � � � �
+$'09;=DLWacegikmoqs}������������������	.Nnty����������/             j              1O��PNG
+
+   IHDR   �   �   2�0�   gAMA  ���a   PLTE                                                                                                                                                                        ��5��5��5��5��3��3��3��3��3��3��2��2��2��2��2��2��2��2��2��2��2��2��2��1��1��1��0�/�.�,Հ+�}*�w)�u)�r)�r-�r-�q-�q-�q-�p*�p,�o,�o,�o,�o,�o,�o,�o,�o,�p,�p,�p-�p-�p,�o,�o,�n,�n,�m,�m,�m,�l+�l*�k)�j'�h'�f&�e&�c'�b'�a'�a'�a'�`'�_%�^$�]$�[#�Z"�X"�W!�U�S�S�R&�R&�R'�R'�R'�Q�Q�Q&�Q&�Q&�P%�P&�P&�P&�P&�P&�P&�P&�P&�P&�P&�P&�P&�P&�P&�P&�P&�O�O�O�O�O �O"�O$O%O%O%O%~N$|M$xJ#wJ#vI#vH#uH"uH!tG sFqEpDmCkBkBjAi@e>c=`;^9[8Y7W6U5S3Q2L/I-D*@'=&;$8"6!30.+
+(	%	"
+
+
+
+		                                       �2&�   8tRNS        	 #',4>DNT\hpz��������������������Ze�s   bKGD �H  �IDATx���[L��ͪx�u]uU�ڮ`����y�D+����>L�VؘUtu�B�N��'�����̃��.(�H�r�K�X�!iG����?��(m���{n&�����3�߱pl�.k���0�v��|��f�����!� �@�΍������O���W\� 8zpK�!����%� J�$
+�����@��B�����DI|��������A�r����>P,��l�%�wge���/��!	R�`ݙ	ȶ|`�}�R�\��r���S��($I(�ɣ07����U��!&��XDQ���A�m�H��𮼗���J"��<�3��)K��3����C�,�)�zC(�(<`2$+�/\I���5�f5��d���E�(J�tz��0�5��^"��$��� �_��-��$C���7�*� 벋�c��֥r�S`$G����֮
+�ˊ�U�ى��I�*���ʿ��y��Hx(��74>5`��T0r�-��f�������ɞ3^��[}�z@��$�:�c�A�����&�C&nO`
+�.9�k/��Z��>p�Ȅ|H�T�g_0�,K����3B���T-c��@�/D�@��E��Y �᱇�g�z�X�(HFf���~H.��e� �?���d�$�Q1�öc�N��"I29{m
+��12�
+'j���F� �U2IF���\FREpt�����R�')�[�ĺNJWpt_jH�$e�U��o�14����aۑ
+r�gtH��_��X��Y�dM���I!_��&���z����9�ې��I���!o]�v8���G�&�@_�����9a�o�^9�'\ X��C�L���N�U$�ya�+��+M&L�:K��Е U,Y�WWcx���FREWpdϧ�ߥ��VH���@�Ь"�k&x��cȦ#�?v	9�g)��Uj5,_ X�<2�#��`�p9Qzc�s��C^����~`��ЪI({
+X7�!���_&��J��Х �����b�H���Pi/p�!2!�1��Ь�h[Ļ��B!g~ f�k70�5<�L���*��SEr\Xx{wL�Ȥ�oo��쒚���5B��Cq�����'�� D&�� ��`MZG
+֘!D��MEr��0B�V� b���o2��޳O���R��S<6�!2��?�o������l!����f�.�p: 2�nY�+�;�RYܶ>D���Kd�T�Ԁߝ:��5{�������ۀ�xzu���f
+����0��9��� �zGd�h[j����e��p�E��2��pً�ߤ��ր�:ݩ"re��l�=�T@Dy�����ȞڑW�u��=7�A�����\;��"��� -Tʲ4��uB��ӽ�׻SNf-3�h9ӺQ��^�TQ�5 X�I�c������X *�7�ў����Ҁ����X�T�=� �k�ou�*e^-:c�2A��ӭ��x�G�tQ��s`���K�(�A���R����.�UdBꇁ��w�ڃ&f�Ty8D;?H�L���:e`�\jB��q�~�*���x�����VV�ݠ��ʝ'��Ѻ*���k
+�����1���FG�RU��L�j=��`榑M`Q�b��*5�*����l������pU�j ����I �g��$�� �AEU�*!�R�N?Pal���~����*!�>�7�mU1
+�>��j!�G����Qz	���n�������}E��B�H���40��O?td"�b���32��>軧|r�LB$��U`q�n�
+�D����t���]�(D��`>�Kp�A$����*���"I���k,�(j�edDJ.��H;Mi�H�P��|T��I�zb@�II�H;Dp^njH�H/D�5@�]�)i�H��
+�P��MsǷ�"	'�b���
+�b)7�@$�y!�7�U}���r{���r��T�������i�:c>䣺C����g�H�����A�]�ͅ'j��T��AA�2��L���X��RJ�q~�y��U^�A��A�2�CkM�H���0ܤP�h_q&A�ʻ0������*�E��̂�+F�x�_e�_���L�8\�@|���A� �|�$��67�)�Cm-"o�9���`���>�ro��Y��
+�0 h�$���(�Ù��~#�y�n�]�|��	mV��_р=Y�˿�B��'�>#�;��'��)
+⒏�j䮨���j'-Y6�Q��Ѡ����
+�-k�M��7Ɓ����HM���ۏ5���NTX�d�6�O'.׷p�'.56�<��K\j�6Y�Y���I[:,gE�7���̥hr�p�L�yD|�S<���"U�BQ�^ND�JӠ�F(�q���#�	�R�Ә��0�q;��4��_����D�>1qNND����#;���8�t�x̆�Tiz���r�l7��{}�CT���������o?��7�����L���������94�9��`kC~�B�S�󇏧�sq4�[iz
+g����ts�َ��C�F�ʞ�� �Y���ǯ,+�'`d�����}��#x,�~����������Qh�Gݲ�!?x�Q�~�t��U���Ga�f4�o�f�����c�����լv�l0q�,�ʟ��{�V���|';X}2\{F&�T�~]o����9e�#����U{e�=�a��ʽ~�h5�X��GZ��{�wSޕ��o49R�����2���b�h�l�i;e�@8ߎh�/P�ro|�9�=3'��0���w��`c◷�AEy�? +�a9���T�b4���9.����േJڒC��J�� ��4O��5�9�3w��Ƃb�}w>�eW�r��P�gҹNz���
+��������д��q��p��� ~�����G�݃� ��o��C��� �Em����8�@8�ۺ��j�٬���L���dee����>������    IEND�B`�Yimage/png_#http://loup-vaillant.fr/penrose.png    1 < N d � � ���!�'�e�f�i�rԈ�����;�D�m���                           �'

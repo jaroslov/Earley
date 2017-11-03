@@ -1,0 +1,639 @@
+bplist00Ò_WebMainResource_WebSubresourcesÕ	
+_WebResourceData_WebResourceMIMEType_WebResourceTextEncodingName^WebResourceURL_WebResourceFrameNameORÇ<!DOCTYPE html><html><head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <link rel="stylesheet" href="/style.css">
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <link rel="alternate" type="application/atom+xml" href="/updates.xml">
+    <title>
+Semantic Actions
+</title>
+    <meta name="description" content="
+The shape of our syntax trees is tied to the form of the grammar.  Semantic actions give us a way to bypass this limitation.  This gets us the convenience of parsing expression grammars.
+">
+  </head>
+  <body>
+    <header>
+      <img id="logo" width="136" height="150" border="0" src="/penrose.png" alt="logo">
+      <h1>@ Loup's</h1>
+      <blockquote><p>Impossible?  Like that would stop me.</p></blockquote>
+    </header>
+
+    <article> 
+<h1>Earley Parsing Explained â€” Semantic Actions</h1>
+
+<p><em>(<a href="semantic-actions.ml">Source code</a> for the impatient)</em>.</p>
+
+<p>We now know how to transform unstructured input into a genuine parse
+tree.  There's only one slight problem: that parse tree is <em>ugly</em>.
+More specifically, that parse tree is entirely determined by the shape
+of the grammar, offering us very little flexibility.  Let us review
+our arithmetic example.</p>
+
+<p>The Grammar:</p>
+
+<pre><code>Sum     -&gt; Sum     [+-] Product
+Sum     -&gt; Product
+Product -&gt; Product [*/] Factor
+Product -&gt; Factor
+Factor  -&gt; '(' Sum ')'
+Factor  -&gt; Number
+Number  -&gt; [0-9]
+</code></pre>
+
+<p>The input we want to parse: <code>1+(2*3+4)</code></p>
+
+<p>The resulting parse tree:</p>
+
+<pre><code>         â”Œâ”€â”€â”€â”€â”€â”
+         â”‚ Sum â”‚
+         â””â”¬â”€â”¬â”€â”¬â”˜
+   â”Œâ”€â”€â”€â”€â”€â”€â”˜ â”‚ â””â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”Œâ”€â”€â”´â”€â”€â”   â”Œâ”€â”´â”€â”   â”Œâ”€â”€â”€â”€â”´â”€â”€â”€â”€â”
+â”‚ Sum â”‚   â”‚ + â”‚   â”‚ Product â”‚
+â””â”€â”€â”¬â”€â”€â”˜   â””â”€â”€â”€â”˜   â””â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”˜
+â”Œâ”€â”€â”´â”€â”€â”€â”€â”€â”€â”        â”Œâ”€â”€â”€â”´â”€â”€â”€â”€â”
+â”‚ Product â”‚        â”‚ Factor â”‚
+â””â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”˜        â””â”€â”¬â”€â”¬â”€â”¬â”€â”€â”˜
+â”Œâ”€â”€â”´â”€â”€â”€â”€â”€â”      â”Œâ”€â”€â”€â”€â”˜ â”‚ â””â”€â”€â”€â”€â”
+â”‚ Factor â”‚    â”Œâ”€â”´â”€â” â”Œâ”€â”€â”´â”€â”€â” â”Œâ”€â”´â”€â”
+â””â”€â”€â”¬â”€â”€â”€â”€â”€â”˜    â”‚ ( â”‚ â”‚ Sum â”‚ â”‚ ) â”‚
+â”Œâ”€â”€â”´â”€â”€â”€â”€â”€â”    â””â”€â”€â”€â”˜ â””â”¬â”€â”¬â”€â”¬â”˜ â””â”€â”€â”€â”˜
+â”‚ Number â”‚    â”Œâ”€â”€â”€â”€â”€â”€â”˜ â”‚ â””â”€â”€â”€â”€â”€â”€â”€â”€â”
+â””â”€â”€â”¬â”€â”€â”€â”€â”€â”˜ â”Œâ”€â”€â”´â”€â”€â”   â”Œâ”€â”´â”€â”   â”Œâ”€â”€â”€â”€â”´â”€â”€â”€â”€â”
+ â”Œâ”€â”´â”€â”     â”‚ Sum â”‚   â”‚ - â”‚   â”‚ Product â”‚
+ â”‚ 1 â”‚     â””â”€â”€â”¬â”€â”€â”˜   â””â”€â”€â”€â”˜   â””â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”˜
+ â””â”€â”€â”€â”˜   â”Œâ”€â”€â”€â”€â”´â”€â”€â”€â”€â”          â”Œâ”€â”€â”€â”´â”€â”€â”€â”€â”
+         â”‚ Product â”‚          â”‚ Factor â”‚
+         â””â”€â”€â”¬â”€â”¬â”€â”¬â”€â”€â”˜          â””â”€â”€â”€â”¬â”€â”€â”€â”€â”˜
+     â”Œâ”€â”€â”€â”€â”€â”€â”˜ â”‚ â””â”€â”€â”€â”€â”€â”       â”Œâ”€â”€â”€â”´â”€â”€â”€â”€â”
+â”Œâ”€â”€â”€â”€â”´â”€â”€â”€â”€â” â”Œâ”€â”´â”€â” â”Œâ”€â”€â”€â”´â”€â”€â”€â”€â”  â”‚ Number â”‚
+â”‚ Product â”‚ â”‚ * â”‚ â”‚ Factor â”‚  â””â”€â”€â”€â”¬â”€â”€â”€â”€â”˜
+â””â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”˜ â””â”€â”€â”€â”˜ â””â”€â”€â”€â”¬â”€â”€â”€â”€â”˜    â”Œâ”€â”´â”€â”
+â”Œâ”€â”€â”€â”€â”´â”€â”€â”€â”        â”Œâ”€â”€â”€â”´â”€â”€â”€â”€â”    â”‚ 4 â”‚
+â”‚ Factor â”‚        â”‚ Number â”‚    â””â”€â”€â”€â”˜
+â””â”€â”€â”€â”€â”¬â”€â”€â”€â”˜        â””â”€â”€â”€â”¬â”€â”€â”€â”€â”˜
+â”Œâ”€â”€â”€â”€â”´â”€â”€â”€â”          â”Œâ”€â”´â”€â”
+â”‚ Number â”‚          â”‚ 3 â”‚
+â””â”€â”€â”€â”€â”¬â”€â”€â”€â”˜          â””â”€â”€â”€â”˜
+   â”Œâ”€â”´â”€â”
+   â”‚ 2 â”‚
+   â””â”€â”€â”€â”˜
+</code></pre>
+
+<p>Ugh. There are too many useless nodes here.  I'd rather have something
+like this:</p>
+
+<pre><code>   â”Œâ”€â”€â”€â”
+   â”‚ + â”‚
+   â””â”¬â”€â”¬â”˜
+  â”Œâ”€â”˜ â””â”€â”
+â”Œâ”€â”´â”€â” â”Œâ”€â”´â”€â”
+â”‚ 1 â”‚ â”‚ - â”‚
+â””â”€â”€â”€â”˜ â””â”¬â”€â”¬â”˜
+     â”Œâ”€â”˜ â””â”€â”
+   â”Œâ”€â”´â”€â” â”Œâ”€â”´â”€â”
+   â”‚ * â”‚ â”‚ 4 â”‚
+   â””â”¬â”€â”¬â”˜ â””â”€â”€â”€â”˜
+  â”Œâ”€â”˜ â””â”€â”
+â”Œâ”€â”´â”€â” â”Œâ”€â”´â”€â”
+â”‚ 2 â”‚ â”‚ 3 â”‚
+â””â”€â”€â”€â”˜ â””â”€â”€â”€â”˜
+</code></pre>
+
+<p>There are several ways to collapse the former into the latter.  One
+way would be to write an ad-hoc recursive algorithm over the parse
+tree.  Another way would be using <em>semantic actions</em>.</p>
+
+<h2>The structure of the parse tree</h2>
+
+<p>Our ugly parse tree has a very straightforward structure.  Its nodes
+are either a token, or the aggregation of a grammar rule and a list of
+sub nodes.  In Ocaml, we write this (the grammar rule is represented
+with an index.)</p>
+
+<pre><code>type 'a parse_tree = Token of 'a
+                   | Node  of int * 'a parse_tree list
+</code></pre>
+
+<p>So, each non-leaf node is associated with exactly one grammar rule.
+Actually, that grammar rule is directly responsible for the creation
+of this node! Here are a couple examples (search for those nodes in
+the tree above).</p>
+
+<pre><code>â”Œâ”€â”€â”€â”€â”€â”
+â”‚ Sum â”‚        Sum -&gt; Sum [+-] Product
+â””â”¬â”€â”¬â”€â”¬â”˜
+
+â”Œâ”€â”€â”€â”´â”€â”€â”€â”€â”
+â”‚ Factor â”‚     Factor  -&gt; '(' Sum ')'
+â””â”€â”¬â”€â”¬â”€â”¬â”€â”€â”˜
+
+â”Œâ”€â”€â”´â”€â”€â”€â”€â”€â”€â”
+â”‚ Product â”‚    Product -&gt; Product [*/] Factor
+â””â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”˜
+
+â”Œâ”€â”´â”€â”
+â”‚ 2 â”‚          nothing, this is a leaf node
+â””â”€â”€â”€â”˜
+</code></pre>
+
+<p>This is important, because the number and nature of the sub nodes is
+entirely determined by the grammar rule involved.  For instance, this
+grammar rule:</p>
+
+<pre><code>Sum -&gt; Sum [+-] Product
+</code></pre>
+
+<p>will always yield a node with 3 sub-nodes, one of which is either
+"<code>+</code>" or "<code>-</code>".  Indeed, you can see that the top node above has 3 sub
+nodes, one of which is "<code>+</code>".</p>
+
+<h2>Walking down the parse tree</h2>
+
+<p>Those invariants are extremely convenient, because they allow potent
+simplifying assumptions.  When we analyse a node, we can use one
+specialised (and <em>simple</em>) piece of code, provided we know which
+grammar rule was involved in the first place.  So we need as many
+pieces of code as there are grammar rules.</p>
+
+<p>Those pieces of code are the semantic actions.</p>
+
+<p>Conceptually, a semantic action is a function: it takes a list of
+values as input, and returns a value.  The input comes from the sub
+nodes.  There is just the special case of tokens, which must have a
+semantic action of their own.  (Possibly none, if you consider tokens
+to be values already.)</p>
+
+<p>In a dynamic language, this would be very easy to describe.  In Ocaml,
+we kinda have to fight the language.  To keep things simple, I have
+decided to emulate a dynamic type system.  So, values shall be
+s-expressions:</p>
+
+<pre><code>type sexpr = Nil
+           | Int    of int
+           | Char   of char
+           | String of string
+           | List   of sexpr list
+</code></pre>
+
+<p>Naturally, semantic actions are functions of this type:</p>
+
+<pre><code>type semantic_action = sexpr list -&gt; sexpr
+</code></pre>
+
+<p>Now we just need to walk down the parse tree:</p>
+
+<pre><code>let act (token_handler : 'a -&gt; sexpr         )
+        (actions       : semantic_action DA.t)
+        (ast           : 'a option parse_tree)
+    : sexpr =
+  let rec aux = function
+    | Token (Some t)    -&gt; token_handler t
+    | Token None        -&gt; Nil
+    | Node (rule, subs) -&gt; (actions &gt;: rule) (List.map aux subs)
+  in aux ast
+</code></pre>
+
+<p>We have 3 parameters here.</p>
+
+<ul>
+<li>The <code>token_handler</code>, which turns a token into an s-expression
+(typically a char or a string).  We use the same token handler for
+every terminal node.</li>
+<li>The <code>actions</code> are an array of semantic actions.  There's one
+semantic action for each grammar rule (no more, no less).</li>
+<li>The <code>ast</code> is the parse tree, represented by its top node.</li>
+</ul>
+
+<p>There are two base cases, depending on whether there is a meaningful
+token or not.  The recursive case computes the values of each sub node
+(<code>List.map&nbsp;aux&nbsp;subs</code> calls <code>aux</code> recursively for each sub node), then
+gives that list to the relevant semantic action (<code>actions&nbsp;&gt;:&nbsp;rule</code>
+denotes array indexing).</p>
+
+<h2>Examples of semantic actions</h2>
+
+<p>Now we can write our semantic actions.  I'll use pseudo-code for
+clarity (the Ocaml code is quite ugly).  I have 3 examples of semantic
+actions, all of which work on our trusty arithmetic expression
+grammar.  I'll write the grammar on the left side, as a reminder.  In
+the actual code, semantic actions are stored in a separate array.</p>
+
+<h3>Interpreter</h3>
+
+<pre><code>            grammar             ||    semantic actions
+--------------------------------||-----------------------------
+Sum     -&gt; Sum     [+-] Product || (l, op, r) -&gt; op(l, r)
+Sum     -&gt; Product              || (p       ) -&gt; p
+Product -&gt; Product [*/] Factor  || (l, op, r) -&gt; op(l, r)
+Product -&gt; Factor               || (f       ) -&gt; f
+Factor  -&gt; '(' Sum ')'          || (_, s , _) -&gt; s
+Factor  -&gt; Number               || (n       ) -&gt; n
+Number  -&gt; [0-9]                || (n       ) -&gt; n
+</code></pre>
+
+<p>These semantic actions directly "interpret" the input.  Considering
+the start symbol is <code>Sum</code>, they will yield a number.  On the input
+<code>1+(2*3+4)</code>, the result is <code>11</code>.</p>
+
+<h3>Abstract syntax tree</h3>
+
+<p>We'll be using s-expressions to denote the AST.</p>
+
+<pre><code>            grammar             ||    semantic actions
+--------------------------------||-----------------------------
+Sum     -&gt; Sum     [+-] Product || (l, op, r) -&gt; List (l, op, r)
+Sum     -&gt; Product              || (p       ) -&gt; p
+Product -&gt; Product [*/] Factor  || (l, op, r) -&gt; List (l, op, r)
+Product -&gt; Factor               || (f       ) -&gt; f
+Factor  -&gt; '(' Sum ')'          || (_, s , _) -&gt; s
+Factor  -&gt; Number               || (n       ) -&gt; n
+Number  -&gt; [0-9]                || (n       ) -&gt; n
+</code></pre>
+
+<p><em>That</em> is how you collapse the parse tree: with some nodes, you just
+pass the result directly to the parent node, without encapsulating it.
+on the input <code>1+(2*3+4)</code>, the result looks like this:</p>
+
+<pre><code>      â”Œâ”€â”€â”€â”€â”€â”
+      â”‚List â”‚
+      â””â”¬â”€â”¬â”€â”¬â”˜
+  â”Œâ”€â”€â”€â”€â”˜ â”‚ â””â”€â”€â”€â”€â”
+â”Œâ”€â”´â”€â”  â”Œâ”€â”´â”€â”  â”Œâ”€â”´â”€â”€â”€â”
+â”‚ 1 â”‚  â”‚ + â”‚  â”‚List â”‚
+â””â”€â”€â”€â”˜  â””â”€â”€â”€â”˜  â””â”¬â”€â”¬â”€â”¬â”˜
+         â”Œâ”€â”€â”€â”€â”€â”˜ â”‚ â””â”€â”€â”€â”€â”
+      â”Œâ”€â”€â”´â”€â”€â”  â”Œâ”€â”´â”€â”  â”Œâ”€â”´â”€â”
+      â”‚List â”‚  â”‚ - â”‚  â”‚ 4 â”‚
+      â””â”¬â”€â”¬â”€â”¬â”˜  â””â”€â”€â”€â”˜  â””â”€â”€â”€â”˜
+   â”Œâ”€â”€â”€â”˜ â”‚ â””â”€â”€â”€â”
+ â”Œâ”€â”´â”€â” â”Œâ”€â”´â”€â” â”Œâ”€â”´â”€â”
+ â”‚ 2 â”‚ â”‚ * â”‚ â”‚ 3 â”‚
+ â””â”€â”€â”€â”˜ â””â”€â”€â”€â”˜ â””â”€â”€â”€â”˜
+</code></pre>
+
+<h3>Postfix notation</h3>
+
+<p>This one is special: it relies on side effects.  Semantic actions can
+be evaluated in a predictable order.  If the host language uses strict
+evaluation, this is very easy.  In our case, the recursive calls are
+such that the semantic actions are triggered node by node, from left
+to right, starting with the sub nodes.  When you evaluate a given
+semantic action, you know the semantic actions for all the sub-nodes
+have been evaluated as well.  From left to right, I might add.</p>
+
+<p>This is a straightforward evaluation strategy, applicable to many
+situations.  We don't have to stick to it, however.  We could give
+control to the semantic actions themselves: instead of giving them a
+list of <em>values</em>, you give them a list of <em>closures</em>, which, when
+evaluated (if at all), will yield the value you would have had
+otherwiseâ€¦ and perform its side effects, if any.</p>
+
+<p>This is the strategy used by Schorre's <a href="https://en.wikipedia.org/wiki/META_II" title="Wikipedia">MetaII</a>.  The difference is,
+instead of parsing some input in a top down fashion, we're walking
+down a fully formed tree.  But I digress.</p>
+
+<pre><code>            grammar             ||    semantic actions
+--------------------------------||-----------------------------
+Sum     -&gt; Sum     [+-] Product || (_, op, _) -&gt; print op; print ' '
+Sum     -&gt; Product              || (p       ) -&gt;
+Product -&gt; Product [*/] Factor  || (l, op, r) -&gt; print op; print ' '
+Product -&gt; Factor               || (f       ) -&gt;
+Factor  -&gt; '(' Sum ')'          || (_, s , _) -&gt;
+Factor  -&gt; Number               || (n       ) -&gt;
+Number  -&gt; [0-9]                || (d       ) -&gt; print d; print ' '
+</code></pre>
+
+<p>Those semantic actions don't return a meaningful result.  They just
+print to the standard output.  Thanks to their natural order of
+evaluation, with the input <code>1+(2*3+4)</code>, they will print this (trailing
+space not shown):</p>
+
+<pre><code>1 2 3 * 4 + +
+</code></pre>
+
+<p>This is a postfix notation, amenable to stack based evaluation:</p>
+
+<ul>
+<li><code>[ 1 ]</code> Push <code>1</code> on the top of the stack.</li>
+<li><code>[ 2 ]</code> Push <code>2</code> on the top of the stack.</li>
+<li><code>[ 3 ]</code> Push <code>3</code> on the top of the stack.</li>
+<li><code>[ * ]</code> Pop the top 2 elements on the stack, multiply them, push
+the result back on the top of the stack.</li>
+<li><code>[ 4 ]</code> Push <code>4</code> on the top of the stack.</li>
+<li><code>[ + ]</code> Pop the top 2 elements on the stack, multiply them, push
+the result back on the top of the stack.</li>
+<li><code>[ + ]</code> Pop the top 2 elements on the stack, multiply them, push
+the result back on the top of the stack.</li>
+</ul>
+
+<p>If you follow these instructions, the stack will evolve like this:</p>
+
+<pre><code>        1     2     3     *     4     +     +
+                  â”Œâ”€â”€â”€â”       â”Œâ”€â”€â”€â”
+                  â”‚ 3 â”‚       â”‚ 4 â”‚
+            â”Œâ”€â”€â”€â” â”œâ”€â”€â”€â”¤ â”Œâ”€â”€â”€â” â”œâ”€â”€â”€â”¤ â”Œâ”€â”€â”€â”
+            â”‚ 2 â”‚ â”‚ 2 â”‚ â”‚ 6 â”‚ â”‚ 6 â”‚ â”‚10 â”‚
+      â”Œâ”€â”€â”€â” â”œâ”€â”€â”€â”¤ â”œâ”€â”€â”€â”¤ â”œâ”€â”€â”€â”¤ â”œâ”€â”€â”€â”¤ â”œâ”€â”€â”€â”¤ â”Œâ”€â”€â”€â”
+      â”‚ 1 â”‚ â”‚ 1 â”‚ â”‚ 1 â”‚ â”‚ 1 â”‚ â”‚ 1 â”‚ â”‚ 1 â”‚ â”‚11 â”‚
+â”Œâ”€â”€â”€â” â”œâ”€â”€â”€â”¤ â”œâ”€â”€â”€â”¤ â”œâ”€â”€â”€â”¤ â”œâ”€â”€â”€â”¤ â”œâ”€â”€â”€â”¤ â”œâ”€â”€â”€â”¤ â”œâ”€â”€â”€â”¤
+â”‚...â”‚ â”‚...â”‚ â”‚...â”‚ â”‚...â”‚ â”‚...â”‚ â”‚...â”‚ â”‚...â”‚ â”‚...â”‚
+</code></pre>
+
+<p>This strategy is not limited to arithmetic expressions.  It can be
+used to generate all kinds of stacked based code.</p>
+
+<h2>A few words on efficiency</h2>
+
+<p>My implementation of semantic actions is simple and modular, but also
+inefficient.  Semantic actions have a well defined structure, which
+makes them easy to optimise.</p>
+
+<p>First, we don't need the parse tree to perform the semantic actions.
+It can be <a href="https://en.wikipedia.org/wiki/Deforestation_%28computer_science%29" title="Deforestation, (Wikipedia)">deforested</a> away.  The way to do this is simple:
+instead of constructing a node of that tree, just call the semantic
+actions directly.  Second, I deferred as many decisions as I could to
+run time.  This means an <em>absurd</em> amount of dynamic dispatch, which can
+be virtually eliminated with a bit of static analysis and code
+generation.  Recall how we construct the parse tree:</p>
+
+<ol>
+<li><p>We start from a completed Earley item.  We have a start position,
+an end position, and a grammar rule.</p></li>
+<li><p>We match each non-terminal node of this rule to a completed item
+(we also test the terminal nodes).  Now we have a list of completed
+Earley items.  They can be seen as the "children" of the item we
+had in step (1).</p></li>
+<li><p>For each item from (2), we (recursively) go back to step (1).  This
+gives us a list of sub-trees (one for each item).  (If we call the
+semantic actions directly, we get a list of values instead)</p></li>
+<li><p>We combine those sub-trees (or values) in a node, that we return to
+the caller.</p></li>
+</ol>
+
+<p>The details of those operations are highly dependent on the particular
+grammar rule involved.  Remember the depth first search we perform in
+step (2)?  That search is exactly as deep as the number of symbols in
+the grammar rule.  Moreover, the symbol involved only depends on the
+depth of the current node.  So when the number and nature of the
+symbol is known in advance, our life is much simpler:</p>
+
+<ul>
+<li>We don't need the full power of recursion.  Nested loops (one per
+non-terminal symbol) are enough.</li>
+<li>We don't have to test for the end of the search: it is implicit in
+the code.  A success in the inner loop means we're done.</li>
+<li>We don't have to look up the symbols in the grammar rules: we can
+just "hard-code" them instead.</li>
+</ul>
+
+<p>Specialised depth-first searches can be generated for each grammar
+rule.  From there, the only significant dispatch lies in step (3): the
+recursive call to the relevant rule.  We can just use an indirect
+call, or we can be clever and switch over the possible cases to help
+the branch predictor of the CPU: not every rule matches any given
+symbol.</p>
+
+<p>And so, we have optimised step (2).  Now let's take a look at (3) and
+(4).</p>
+
+<p>In addition to the previous optimisations, code generation also
+enables static typing for the semantic actions themselves.
+Originally, I needed the semantic actions to all have the same type,
+effectively reverting back to dynamic typing, and all the
+inefficiencies it entails.  (There are other <a href="https://en.wikipedia.org/wiki/Generalized_algebraic_data_type" title="Generalise Algebraic Data Type (Wikipedia)">possibilities</a>,
+but I won't go there.)</p>
+
+<p>The values from step (3) have a type that depends on the symbol
+involved. I mean, it wouldn't make sense for 2 rules with the same
+left hand side to return values of different types.  Since those types
+are known in advance, we don't have to go through generic semantic
+actions.  For instance, if a semantic actions needs an integer, we can
+guarantee it will have just that â€”no need for any run time test.</p>
+
+<p>But there's more.  Sometimes, a semantic action doesn't need all the
+values it could get from below.  With a generic approach, short of
+using lazy evaluation, we still dig to the bottom no matter what.  The
+specialised approach can instead <em>omit</em> the parts of step (3) that
+are not needed.  Depending on the particular grammar and semantic
+actions involved this can be huge: these are recursive calls.  Behind
+them lie an entire sub-trees worth of computation.</p>
+
+<p>Just one word of caution: if you're counting on side effects performed
+by the very semantic actions you could omit that way, it might want
+to give some explicit control to the semantic action writers.</p>
+
+<p>And so, we have optimised steps (2), (3), and (4).</p>
+
+<p>The current source code doesn't perform those optimisations.  That
+would obscure the essence of semantic actions.  Just keep them in
+mind, in case you end up writing a production-quality parsing
+framework (the whole point of this series, really).</p>
+
+ </article>
+
+    <nav>
+      <a href="/">Home</a>
+      
+<ul>
+<li>
+<a href="/articles/">
+My essays/
+</a>
+
+</li>
+<li>
+<a href="/projects/">
+Projects/
+</a>
+
+</li>
+<li>
+<a href="/tutorials/">
+Tutorials/
+</a>
+<ul>
+<li>
+<a href="/tutorials/poly1305-design">
+The design of Poly1305
+</a>
+
+</li>
+<li>
+<a href="/tutorials/chacha20-design">
+The design of Chacha20
+</a>
+
+</li>
+<li>
+<a href="/tutorials/monty-hall">
+Monty Hall: the Complete and Definitive Solution
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/">
+Earley Parsing Explained/
+</a>
+<ul>
+<li>
+<a href="/tutorials/earley-parsing/what-and-why">
+What is Earley parsing, and why you should care?
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/chart-parsing">
+Chart Parsing
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/recogniser">
+The Recogniser
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/empty-rules">
+Empty Rules
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/right-recursion">
+Optimising Right Recursion
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/parser">
+The Parser
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/semantic-actions">
+Semantic Actions
+</a>
+
+</li>
+</ul>
+</li>
+<li>
+<a href="/tutorials/avoid-assignment">
+How to avoid the assignment statement
+</a>
+
+</li>
+<li>
+<a href="/tutorials/from-imperative-to-functional">
+From Imperative to Functional: how to make the leap.
+</a>
+
+</li>
+<li>
+<a href="/tutorials/ultimate-css-layout">
+My ultimate CSS layout
+</a>
+
+</li>
+</ul>
+</li>
+<li>
+<a href="/contact">
+Contact me
+</a>
+
+</li>
+</ul>
+
+    </nav>
+
+    <footer>
+      Contact, suggestions: Send me an email at
+      <a href="mailto:l@loup-vaillant.fr">l@loup-vaillant.fr</a><br>
+      <a href="/updates">Atom feed</a><br>
+      Built with <a href="/projects/ussm">USSM</a>
+    </footer>
+  
+
+
+</body></html>Ytext/htmlUUTF-8_Ahttp://loup-vaillant.fr/tutorials/earley-parsing/semantic-actionsP¢Ô_WebResourceResponseOqbplist00ÔnoX$versionX$objectsY$archiverT$top † ¯!#)*0123OPQRSTUVWXYZ[\]^_`abcdeiU$nullİ	
+ !"R$6S$10R$2R$7R$3S$11R$8V$classR$4R$9R$0R$5R$1€	€€€ € €€€Ó$%'(WNS.base[NS.relative€ €€_!http://loup-vaillant.fr/style.cssÒ+,-.Z$classnameX$classesUNSURL¢-/XNSObject#A¾j!i»ô ÈÓ456BNWNS.keysZNS.objects«789:;<=>?@A€	€
+€€€€€€€€€«CEFGHIJKLM€€€€€€€€€€€€VServer\Content-TypeTVary]Last-ModifiedTEtag]Accept-RangesTDate_Content-Encoding^Content-LengthZKeep-AliveZConnection_Apache/2.2.16 (Debian)Xtext/css_Accept-Encoding_Mon, 29 Jun 2015 09:44:54 GMT_"32ad-60d-519a4f11b9180"Ubytes_Tue, 28 Feb 2017 21:32:33 GMTTgzipS548_timeout=15, max=100ZKeep-AliveÒ+,fg_NSMutableDictionary£fh/\NSDictionaryÒ+,jk_NSHTTPURLResponse£lm/_NSHTTPURLResponse]NSURLResponse_NSKeyedArchiverÑpq_WebResourceResponse€    # - 2 7 [ a |  ƒ † ‰ Œ  “ š    £ ¦ © « ­ ¯ ± ³ ´ ¶ ¸ º ¼ ¾ À Â É Ñ İ ß á ã &)2;=?FNYegikmoqsuwy{‡‰‹‘“•—™›Ÿ¦³¸ÆËÙŞñ /8Jj…‹«°´ÊÕÚğô2@RUk             r              mO/* reset */
+header, nav, article, footer, body, html, pre code
+{ display:block; margin:0; color:black; }
+
+/* colors */
+html, body { background-color:#fff8f0; }
+footer     { background-color:#f0e4d0; }
+pre code   { background-color:#f0e4d0; }
+
+/* round corners, margins */
+html     { margin:1.5em }
+footer   { border-radius        : 1.5em;
+           -moz-border-radius   : 1.5em;
+           -webkit-border-radius: 1.5em;
+           margin-bottom: 1.5em; padding: 1em; }
+pre code { border-radius        : 1em;
+           -moz-border-radius   : 1em;
+           -webkit-border-radius: 1em;
+           margin: 1em 0 1em 0;
+           padding:0.5em;}
+nav ul   { margin:  0;
+           padding: 0 0 0 1em; }
+header, nav, article { margin-bottom: 1.5em;
+                       padding: 1em; }
+
+/* style */
+a:visited         { color: #822; }
+a:hover           { color: #f50; }
+code              { font-size: 120%; }
+nav a             { text-decoration: none; }
+nav ul, footer    { font-size: 0.83em; }
+nav ul ul         { font-size: 1em; }
+header blockquote { font-style: italic; } /* slogan */
+header #logo      { float: right;
+                    margin-bottom: 2em; }
+h1                { font-size: 180% }
+table tr td       { text-align: center;
+                    padding: 5px; }
+table tr th       { text-align: center;
+                    padding: 5px; }
+
+/* layout */
+body    { width: 63em; margin: auto; }
+article { float:left; margin-left:  18em; width: 42em;   }
+nav     { float:left; margin-left: -61em; width: 14.5em; }
+footer  { clear: both; }
+Xtext/css_!http://loup-vaillant.fr/style.cssÔO%bplist00ÔfgX$versionX$objectsY$archiverT$top † ¯#)*0123KLMNOPQRSTUVWXYZ[\]aU$nullİ	
+ !"R$6S$10R$2R$7R$3S$11R$8V$classR$4R$9R$0R$5R$1€	€€€ €€€€Ó$%'(WNS.base[NS.relative€ €€_#http://loup-vaillant.fr/penrose.pngÒ+,-.Z$classnameX$classesUNSURL¢-/XNSObject#A¾j!i¼æ ÈÓ456@JWNS.keysZNS.objects©789:;<=>?€	€
+€€€€€€€©ACDEFGHI€€€€€€€€€€VServer\Content-TypeTEtag]Last-ModifiedTDate]Accept-Ranges^Content-LengthZKeep-AliveZConnection_Apache/2.2.16 (Debian)Yimage/png_"22e3-f86-4ba5de191db80"_Sat, 03 Mar 2012 22:04:46 GMT_Fri, 03 Mar 2017 21:54:23 GMTUbytesT3974_timeout=15, max=98ZKeep-AliveÒ+,^__NSMutableDictionary£^`/\NSDictionaryÒ+,bc_NSHTTPURLResponse£de/_NSHTTPURLResponse]NSURLResponse_NSKeyedArchiverÑhi_WebResourceResponse€    # - 2 7 W ] x {  ‚ … ˆ Œ  – ™ œ Ÿ ¢ ¥ § © « ­ ¯ ° ² ´ ¶ ¸ º ¼ ¾ Å Í Ù Û İ ß
+$'09;=DLWacegikmoqs}ƒ…‡‰‹‘˜¥ª¸½ËÚåğ	.Nnty™´¸ÅÊŞâö/             j              1O†‰PNG
+
+   IHDR   ˆ   –   2¸0‹   gAMA  ±üa   PLTE                                                                                                                                                                        ÿ¡5ÿ¡5ÿ¡5ÿ 5ÿš3ÿš3ÿš3ÿš3ÿš3ÿš3ÿ™2ÿ™2ÿ™2ÿ™2ÿ™2ÿ™2ÿ™2ÿ™2ÿ™2ş˜2ş˜2ş˜2ı˜2ü—1û–1÷”1ô’0í/êŒ.â‡,Õ€+Ï}*Æw)Âu)»r)¸r-·r-·q-¶q-¶q-µp*´p,²o,²o,³o,²o,²o,²o,²o,²o,³p,´p,´p-µp-µp,´o,²o,±n,±n,°m,°m,¯m,¯l+®l*­k)­j'©h'§f&¤e& c'b'œa'œa'œa'›`'›_%™^$—]$”[#’Z"X"W!‹U‰SˆSƒR&ƒR&„R'ƒR'„R'†Q…Q‚Q&‚Q&‚Q&€P%€P&€P&€P&€P&€P&€P&€P&€P&€P&€P&P&P&P&P&P&P&ƒO‚O‚OO€O €O"€O$O%O%O%O%~N$|M$xJ#wJ#vI#vH#uH"uH!tG sFqEpDmCkBkBjAi@e>c=`;^9[8Y7W6U5S3Q2L/I-D*@'=&;$8"6!30.+
+(	%	"
+
+
+
+		                                       2&ï   8tRNS        	 #',4>DNT\hpz„™¤­´½ÃÉÒİâåèêîñóùşZe™s   bKGD ˆH  àIDATxÚÅÜ[LÙğ¾ÍªxÙu]uUÄÚ®`–´™Çy›D+¤¤Ïç¡>L¢VØ˜UtuíBşN²'éÓşİİÌƒ·à.( H¡r“K¹XŠ!iG…øüı? ®(mçÓú{n&ŸœùÍé™3¿ß±pl±.k—–°0üvãŞ|«Õfµæïßù!ë³ À@ŞÎŸ²Ûğı×O——•W\îŒ 8zpKæ!Û€Éß%» J¢$
+’²¶ñ—@î–ÌBÖçƒ¿êDI|ÂÉò èàšÌA²rŠ¡õŸ>P,…½là%Šwge²Û•/·!	RÅ`İ™	È¶|`ò²}ÆR”\Ÿò¶¥r°üS‚˜($I(½É£07­¬àU¿Ó!&ÉáXDQöº´A²mÀH¹”ğ®¼—ˆ¦¤J"ÈÖ<ğ3×í)KÇï3ÀÁÍæCÖ,Ó)ˆzC(ı(<`2$+»/\IÔ’Ã5ôf5©²d§˜¨E‡(J¢tz°î0²5˜º^"²‡$Úÿˆ ¹_›É-Ãé$C¡´…7˜*Ë ë²‹Àc ãÖ¥r—S`$Gù£»Ö®
+²ËŠ¥U€Ù‰®ŠI*§¤Ê¿yàùHx(ø¤74>5`²¶T0rƒ-àÀfƒìãà®ÕÉ3^¯Ç[}ñz@¤ó¤‘$¸:€cûAö‚Ÿ¸â&ïC&nO`
+Ğ.9™k/íZÃÙ>pÈ„|HñTÿg_0ğ,KÂ‰Êğ‡·3B²Á÷T-c¼–@è/DÉ@ª´EıY á±‡¬gêz€X—(HFf•àø~H.Âçe’ Ü?¸äd€$ÉQ1ÆÃ¶cNÈà"I29{m
+˜¨12İ
+'jæÁúF¤ ½U2IF©êšú\FREptÌû¿ÔÙR¯')Â[ÛÄºNJWpt_jHÂ$eÈUõão«14Á•œãaÛ‘
+rígtHÈÙ_¢ÀX¥¡YådMü¡­I!_€¯&úÂİz¥ŠÔ9ìÛ’I·¬Ë!o]ˆv8ŒıõG÷&†@_Ñ²ûÊ¯9aäoÙ^9Æ'\ X¸üCô‡LÎıÆN˜U$ÁyaÅ+ŞË+M&Lœ:K¥ŠĞ• U,Y¶WWcxêúFREWpdÏ§ß¥ÎVH•ŸÃ@ÔĞ¬"Ùk&xşöcÈ¦#ó?v	9ÿg)·šUj5,_ X¾<2‘#”ª`èp9Qzcàs²–C^‚™º~`¶ÍĞªI({
+X7›!„Èî_&™JÉĞĞ¥ Û‘Éù¿bÀH¹ÃÈPi/pÀ!2!ı1 ÍĞ¬âh[Ä»ÒÕB!g~ fÿk70ë5<òLƒ²”*§ÙSEr\Xx{wLÈ¤úoo†Ëì’š…¥Œ5Bˆì•Cq ¥ÔÁ'Àó D&äâ ¹å`MZG
+Ö˜!D–İMErÍï0BñV· bÜºo2„ÈŞ³OãÀ­R¦„S<6™!2ñÖ?¦o”°¬ú°ßl!„¸ÿfÛ.àp: 2©nYÀ+ı;ÆRYÜ¶>D®ûÑKdöT©Ô€ß:‡Ä5{ô«³‘¹ Û€„xzuşı¸f
+·¦€œ0ÿç9æÛã© ÚzGd¦h[jˆ„®’e–ñp·E€¡2½ÏpÙ‹ãß¤†ÜÖ€¾:İ©"re˜¾l×=—T@Dyğ˜ïõè“ÈÚ‘WÀu–=7õA¨ÚĞşˆ\;—’"ËŞÚ -TÊ²4±‡uB¨ê¿Ó½Œ×»SNf-3Àh9ÓºQ¨^¥TQ†5 XçIcÀÔÕï÷ÇX *õ7Ñ„³Šì©Ò€§ØŒ’X¥Tõ= ‘kòŠou°*e^-:c2A¨ê¿Ó­áÍx½GştQôÏs`¤œõK (Aäş„RÕç™ôÔ.›UdBê‡™öw±Úƒ&f¥Ty8D;?HùLõ€Ü:e`“\jB©ïq˜~—*²·ºxÍø™øİVVĞİ „¨Ê'À›Ñº*™âşk
+³®˜—®1 ›ªFG„RU¹ıLºj=Şú`æ¦‘M`Qªb­*5¡*¥ÍãÀl—¥ò¿ŸğpUéj ”ªªïI ¼gŠ¢$”Ş ´AEUé*!”RåN?Pal“æê~¨¼½Ò*!”>¾7²mU1
+Ì>ñ½¿Îj!şGÀ÷ìÉQz	ïú—nËç‚ÎëÀÂø}EıàB‡H¢ıê40ùÈO?td"‰bÙú–32‘Î>è»§|r¡LB$áÔU`qünã
+ÊDíµ“Àt«úñ]É(D…²`>èKp¡A$ÁÙúï*¿©Ÿ"I‚óòk,†(jÂedDJ.„H;Mi‡H¢Pæú|TıœIzb@¨IIÊH;Dp^njHÁH/D’5@¤]¥)i„H¢à
+±P£¥MsÇ·¤"	'ºbÀÓû
+Õb)7óŒ@$Áy!†7“U}õ‘–r{Ó¤¤r˜¨T§ƒÒîÔ¾¬i©:c>ä£ºCõ¦Şg„H‚Ğ›ıÃAé]›Í…'jâÀT«AA©2ŒÎLˆä¨æX’ƒRJÕq~‡y·U^ñA…A©2ŠCkMƒH‚£ã0Ü¤PÆh_q&A–Ê»0İêû‘¡*EìæÌ‚Ø+F€xà¶_e_‹ÈåL‚8\@|°A• |Î$ˆĞ67ù)³Cm-"o­9’Ê`ºİÇ>ªroÈÕY¶‘
+²0 h$¥¾î(Ã™âÃ~#¥y°nÕ]ì”|£¦	mVØª_Ñ€=YúË¿’BÔÆ'í>#Œ;İÚ'õÇ)
+â’ˆjä®¨¾Àój'-Y6íŠQˆÑ şÏø•
+-k“Mšñ7Æı›˜ËHM…¨şÛ5ğ‡¾NTXôd¢6´O'.×·pÙ'.56¢<ïK\j¼6YñµY•úãI[:,gE›7½•ŞÌ¥hr±pÜL¤yD|­S<îü"UËBQ¬^ND¥JÓ F(Çq‡ğÄ#§	¢RßÓ˜Ö0Çq;º4ˆ_ÌãÓçD>1qNNDıõÑ#;×êí8ÚtœxÌ†¨Tizª¿¡r©l7øÎ{}ŒCTÚŠ¹›ÙÚãöo?»Â7£•ªí³L”ï÷«ûôÙ94š9šÃ`kC~ßB™S¾ó‡§Øsq4ø[iz
+gë¶ı·©tsøÙÊCÎFÑÊıó ëY–ôÇ¯,+‘'`dĞöˆ‘æ}Ëò#x,×~ğüÈÏĞËöÖÔæQh Gİ²Â!?xßQä~„t¯UÕ¯ŸGaîf4§oÏfş÷¾¼ªcúê¾à·Õ¬vıl0q…,¥ÊŸˆê{»V©Úú|';X}2\{F&„TÍ~]oö÷Ã«9eå#²òŠÁ·U{eÙ=Ša¯úÊ½~ h5§XÃGZÜÄ{‹wSŞ•Æào49Rû±ÛŒÖ2‰ šbæhlÙi;eı@8ßh²/Pªro|Å9«=3'éÑ0ëòŠÁw¼Æ`câ—·»AEy«? +Åa9Û½Tµb4ôÎÛ9.İËùàµ‡JÚ’C÷Jë÷ ¼ø4OšÆ5ğ9ë3wÄÔÆ‚bğ}w>ØeW©rûÑPœgÒ¹NzİúÖ
+ÌŸ²” ¾¦Ğ´ÜÆq™…pÜŞï ~´·õÑÃG­İƒ³ åoç¸ÌC¸»­ øEm€üì¯8î³@8Ûº¯Àj³Ù¬‡ìâLÛÏ×dee­áÒÿ>ù‰´ú„ô    IEND®B`‚Yimage/png_#http://loup-vaillant.fr/penrose.png    1 < N d ‚ ‘ ¨SsS}SƒSÇSÈSËSÔSêX_^p^y^^¦bÏrYrc                           r‰

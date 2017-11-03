@@ -1,0 +1,357 @@
+bplist00Ò_WebMainResource_WebSubresourcesÕ	
+_WebResourceData_WebResourceMIMEType_WebResourceTextEncodingName^WebResourceURL_WebResourceFrameNameO+><!DOCTYPE html><html><head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <link rel="stylesheet" href="/style.css">
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <link rel="alternate" type="application/atom+xml" href="/updates.xml">
+    <title>
+Chart Parsing
+</title>
+    <meta name="description" content="
+Earley parser are what we call " chart="" parsers",="" or="" "table="" parsers".="" they="" store="" information="" about="" partial="" parses="" in="" tables.="" "="">
+  </head>
+  <body>
+    <header>
+      <img id="logo" width="136" height="150" border="0" src="/penrose.png" alt="logo">
+      <h1>@ Loup's</h1>
+      <blockquote><p>Impossible?  Like that would stop me.</p></blockquote>
+    </header>
+
+    <article> 
+<h1>Earley Parsing Explained â€” Chart Parsing</h1>
+
+<p>We can't parse the whole input all at once and magically get a full
+parse tree from the input.  We have to work it out bit by bit somehow.
+One way to do it is to rely on induction to construct the tree
+directly.  That's how recursive descent parsers work.</p>
+
+<p>Another way to do it is to construct a list of <strong>partial parses</strong>.
+Here's one for instance:</p>
+
+<pre><code> â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”
+â”Œâ”¤ Number â”œâ”
+â”‚â””â”€â”€â”€â”€â”€â”€â”€â”€â”˜â”‚
+â”‚          â”‚
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”
+â”‚    1     â”‚  +  â”‚  (  â”‚  2  â”‚  *  â”‚  3  â”‚  -  â”‚  4  â”‚  )  â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”˜
+</code></pre>
+
+<p>Here we just parsed the first character, a number.  Here's more:</p>
+
+<pre><code> â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”                     â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”
+â”Œâ”¤ Number â”œâ”     â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤ Factor â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚â””â”€â”€â”€â”€â”€â”€â”€â”€â”˜â”‚     â”‚              â””â”€â”€â”€â”€â”€â”€â”€â”€â”˜                 â”‚
+â”‚          â”‚     â”‚                                         â”‚
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”
+â”‚    1     â”‚  +  â”‚  (  â”‚  2  â”‚  *  â”‚  3  â”‚  -  â”‚  4  â”‚  )  â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”˜
+                                   â”‚                 â”‚
+                                   â”‚     â”Œâ”€â”€â”€â”€â”€â”     â”‚
+                                   â””â”€â”€â”€â”€â”€â”¤ Sum â”œâ”€â”€â”€â”€â”€â”˜
+                                         â””â”€â”€â”€â”€â”€â”˜
+</code></pre>
+
+<p>Now with a bit more work, we can construct a complete parse.  Recall
+the following grammar:</p>
+
+<pre><code>Sum     = Sum     [+-] Product
+        | Product
+Product = Product [*/] Factor
+        | Factor
+Factor  = '(' Sum ')'
+        | Number
+Number  = [0-9]+
+</code></pre>
+
+<p>We can use it to find all the partial parses we need, including one
+that spans the whole input. Here are some:</p>
+
+<pre><code>                            â”Œâ”€â”€â”€â”€â”€â”
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤ Sum â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚                           â””â”€â”€â”€â”€â”€â”˜                         â”‚
+â”‚  â”Œâ”€â”€â”€â”€â”€â”                                                  â”‚
+â”Œâ”€â”€â”¤ Sum â”œâ”€â”€â”                                               â”‚
+â”‚  â””â”€â”€â”€â”€â”€â”˜  â”‚                                               â”‚
+â”‚â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”â”‚                                               â”‚
+â”Œâ”¤ Product â”œâ”                                               â”‚
+â”‚â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜â”‚                                               â”‚
+â”‚â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â” â”‚                    â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”                â”‚
+â”Œâ”¤ Factor â”œâ”€â”     â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤ Product â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚â””â”€â”€â”€â”€â”€â”€â”€â”€â”˜ â”‚     â”‚              â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜                â”‚
+â”‚â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â” â”‚     â”‚              â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”                 â”‚
+â”Œâ”¤ Number â”œâ”€â”     â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤ Factor â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚â””â”€â”€â”€â”€â”€â”€â”€â”€â”˜ â”‚     â”‚              â””â”€â”€â”€â”€â”€â”€â”€â”€â”˜                 â”‚
+â”‚           â”‚     â”‚                                         â”‚
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”
+â”‚    1      â”‚  +  â”‚  (  â”‚  2  â”‚  *  â”‚  3  â”‚  -  â”‚  4  â”‚  )  â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”˜
+</code></pre>
+
+<p>Note that I take the <code>Factor</code> at the lower right for granted.  A real
+parser would of course dig deeper before determining that this
+sub-string is indeed a "factor".  Now let's remove some useless fluff
+for ease of reading:</p>
+
+<pre><code>                            â”Œâ”€â”€â”€â”€â”€â”
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤ Sum â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚                           â””â”€â”€â”€â”€â”€â”˜                         â”‚
+â”‚â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”                      â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”                 â”‚
+â”Œâ”¤ Number â”œâ”€â”     â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤ Factor â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚â””â”€â”€â”€â”€â”€â”€â”€â”€â”˜ â”‚     â”‚              â””â”€â”€â”€â”€â”€â”€â”€â”€â”˜                 â”‚
+â”‚           â”‚     â”‚                                         â”‚
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”
+â”‚    1      â”‚  +  â”‚  (  â”‚  2  â”‚  *  â”‚  3  â”‚  -  â”‚  4  â”‚  )  â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”˜
+</code></pre>
+
+<p>When you think about it, this is just another way of representing the
+following parse tree:</p>
+
+<pre><code>          â”Œâ”€â”€â”€â”€â”€â”
+          â”‚ Sum â”‚
+          â””â”€â”¬â”¬â”¬â”€â”˜
+    â”Œâ”€â”€â”€â”€â”€â”€â”€â”˜â”‚â””â”€â”€â”€â”€â”€â”€â”€â”
+â”Œâ”€â”€â”€â”´â”€â”€â”€â”€â” â”Œâ”€â”´â”€â”  â”Œâ”€â”€â”€â”´â”€â”€â”€â”€â”
+â”‚ Number â”‚ â”‚ + â”‚  â”‚ Factor â”‚
+â””â”€â”€â”€â”¬â”€â”€â”€â”€â”˜ â””â”€â”€â”€â”˜  â””â”€â”€â”€â”¬â”€â”€â”€â”€â”˜
+  â”Œâ”€â”´â”€â”        â”Œâ”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”
+  â”‚ 1 â”‚        â”‚ ( 2 * 3 - 4 ) â”‚ &lt;- taken for granted
+  â””â”€â”€â”€â”˜        â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+</code></pre>
+
+<h2>Useless work</h2>
+
+<p>All partial parses are not useful.  Remember this one I showed
+earlier?</p>
+
+<pre><code>â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”
+â”‚    1     â”‚  +  â”‚  (  â”‚  2  â”‚  *  â”‚  3  â”‚  -  â”‚  4  â”‚  )  â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”˜
+                                   â”‚                 â”‚
+                                   â”‚     â”Œâ”€â”€â”€â”€â”€â”     â”‚
+                                   â””â”€â”€â”€â”€â”€â”¤ Sum â”œâ”€â”€â”€â”€â”€â”˜
+                                         â””â”€â”€â”€â”€â”€â”˜
+</code></pre>
+
+<p>Taken in isolation, the sub-string <code>3-4</code> is indeed a <code>Sum</code> (a
+difference counts as a <code>Sum</code> in my grammar).  But when you add a bit
+of context you can see this is a dead end: <code>2*3-4</code> reads (2Ã—3)âˆ’4, not
+2Ã—(3âˆ’4).  So, as correct as it is, this partial parse is useless.  In
+practice many are, and some parsers waste too much time on them.</p>
+
+<p>When you think about it, it doesn't make sense to even try to parse
+<code>3-4</code> as a <code>Sum</code>: it follows a star (<code>*</code>), and the grammar says that
+stars are followed by factors, not by sums.</p>
+
+<p>Here lies Earley's genius: his parsers avoid most unnecessary work by
+not even trying a whole slew of hopeless partial parses like this one.
+This makes it faster than many alternatives.</p>
+
+ </article>
+
+    <nav>
+      <a href="/">Home</a>
+      
+<ul>
+<li>
+<a href="/articles/">
+My essays/
+</a>
+
+</li>
+<li>
+<a href="/projects/">
+Projects/
+</a>
+
+</li>
+<li>
+<a href="/tutorials/">
+Tutorials/
+</a>
+<ul>
+<li>
+<a href="/tutorials/poly1305-design">
+The design of Poly1305
+</a>
+
+</li>
+<li>
+<a href="/tutorials/chacha20-design">
+The design of Chacha20
+</a>
+
+</li>
+<li>
+<a href="/tutorials/monty-hall">
+Monty Hall: the Complete and Definitive Solution
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/">
+Earley Parsing Explained/
+</a>
+<ul>
+<li>
+<a href="/tutorials/earley-parsing/what-and-why">
+What is Earley parsing, and why you should care?
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/chart-parsing">
+Chart Parsing
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/recogniser">
+The Recogniser
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/empty-rules">
+Empty Rules
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/right-recursion">
+Optimising Right Recursion
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/parser">
+The Parser
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/semantic-actions">
+Semantic Actions
+</a>
+
+</li>
+</ul>
+</li>
+<li>
+<a href="/tutorials/avoid-assignment">
+How to avoid the assignment statement
+</a>
+
+</li>
+<li>
+<a href="/tutorials/from-imperative-to-functional">
+From Imperative to Functional: how to make the leap.
+</a>
+
+</li>
+<li>
+<a href="/tutorials/ultimate-css-layout">
+My ultimate CSS layout
+</a>
+
+</li>
+</ul>
+</li>
+<li>
+<a href="/contact">
+Contact me
+</a>
+
+</li>
+</ul>
+
+    </nav>
+
+    <footer>
+      Contact, suggestions: Send me an email at
+      <a href="mailto:l@loup-vaillant.fr">l@loup-vaillant.fr</a><br>
+      <a href="/updates">Atom feed</a><br>
+      Built with <a href="/projects/ussm">USSM</a>
+    </footer>
+  
+
+
+</body></html>Ytext/htmlUUTF-8_>http://loup-vaillant.fr/tutorials/earley-parsing/chart-parsingP¢Ô_WebResourceResponseOqbplist00ÔnoX$versionX$objectsY$archiverT$top † ¯!#)*0123OPQRSTUVWXYZ[\]^_`abcdeiU$nullİ	
+ !"R$6S$10R$2R$7R$3S$11R$8V$classR$4R$9R$0R$5R$1€	€€€ € €€€Ó$%'(WNS.base[NS.relative€ €€_!http://loup-vaillant.fr/style.cssÒ+,-.Z$classnameX$classesUNSURL¢-/XNSObject#A¾j!Qh*E ÈÓ456BNWNS.keysZNS.objects«789:;<=>?@A€	€
+€€€€€€€€€«CEFGHIJKLM€€€€€€€€€€€€VServer\Content-TypeTVary]Last-ModifiedTEtag]Accept-RangesTDate_Content-Encoding^Content-LengthZKeep-AliveZConnection_Apache/2.2.16 (Debian)Xtext/css_Accept-Encoding_Mon, 29 Jun 2015 09:44:54 GMT_"32ad-60d-519a4f11b9180"Ubytes_Tue, 28 Feb 2017 21:32:33 GMTTgzipS548_timeout=15, max=100ZKeep-AliveÒ+,fg_NSMutableDictionary£fh/\NSDictionaryÒ+,jk_NSHTTPURLResponse£lm/_NSHTTPURLResponse]NSURLResponse_NSKeyedArchiverÑpq_WebResourceResponse€    # - 2 7 [ a |  ƒ † ‰ Œ  “ š    £ ¦ © « ­ ¯ ± ³ ´ ¶ ¸ º ¼ ¾ À Â É Ñ İ ß á ã &)2;=?FNYegikmoqsuwy{‡‰‹‘“•—™›Ÿ¦³¸ÆËÙŞñ /8Jj…‹«°´ÊÕÚğô2@RUk             r              mO/* reset */
+header, nav, article, footer, body, html, pre code
+{ display:block; margin:0; color:black; }
+
+/* colors */
+html, body { background-color:#fff8f0; }
+footer     { background-color:#f0e4d0; }
+pre code   { background-color:#f0e4d0; }
+
+/* round corners, margins */
+html     { margin:1.5em }
+footer   { border-radius        : 1.5em;
+           -moz-border-radius   : 1.5em;
+           -webkit-border-radius: 1.5em;
+           margin-bottom: 1.5em; padding: 1em; }
+pre code { border-radius        : 1em;
+           -moz-border-radius   : 1em;
+           -webkit-border-radius: 1em;
+           margin: 1em 0 1em 0;
+           padding:0.5em;}
+nav ul   { margin:  0;
+           padding: 0 0 0 1em; }
+header, nav, article { margin-bottom: 1.5em;
+                       padding: 1em; }
+
+/* style */
+a:visited         { color: #822; }
+a:hover           { color: #f50; }
+code              { font-size: 120%; }
+nav a             { text-decoration: none; }
+nav ul, footer    { font-size: 0.83em; }
+nav ul ul         { font-size: 1em; }
+header blockquote { font-style: italic; } /* slogan */
+header #logo      { float: right;
+                    margin-bottom: 2em; }
+h1                { font-size: 180% }
+table tr td       { text-align: center;
+                    padding: 5px; }
+table tr th       { text-align: center;
+                    padding: 5px; }
+
+/* layout */
+body    { width: 63em; margin: auto; }
+article { float:left; margin-left:  18em; width: 42em;   }
+nav     { float:left; margin-left: -61em; width: 14.5em; }
+footer  { clear: both; }
+Xtext/css_!http://loup-vaillant.fr/style.cssÔO%bplist00ÔfgX$versionX$objectsY$archiverT$top † ¯#)*0123KLMNOPQRSTUVWXYZ[\]aU$nullİ	
+ !"R$6S$10R$2R$7R$3S$11R$8V$classR$4R$9R$0R$5R$1€	€€€ €€€€Ó$%'(WNS.base[NS.relative€ €€_#http://loup-vaillant.fr/penrose.pngÒ+,-.Z$classnameX$classesUNSURL¢-/XNSObject#A¾j!Qh< ÈÓ456@JWNS.keysZNS.objects©789:;<=>?€	€
+€€€€€€€©ACDEFGHI€€€€€€€€€€VServer\Content-TypeTEtag]Last-ModifiedTDate]Accept-Ranges^Content-LengthZKeep-AliveZConnection_Apache/2.2.16 (Debian)Yimage/png_"22e3-f86-4ba5de191db80"_Sat, 03 Mar 2012 22:04:46 GMT_Fri, 03 Mar 2017 21:54:23 GMTUbytesT3974_timeout=15, max=98ZKeep-AliveÒ+,^__NSMutableDictionary£^`/\NSDictionaryÒ+,bc_NSHTTPURLResponse£de/_NSHTTPURLResponse]NSURLResponse_NSKeyedArchiverÑhi_WebResourceResponse€    # - 2 7 W ] x {  ‚ … ˆ Œ  – ™ œ Ÿ ¢ ¥ § © « ­ ¯ ° ² ´ ¶ ¸ º ¼ ¾ Å Í Ù Û İ ß
+$'09;=DLWacegikmoqs}ƒ…‡‰‹‘˜¥ª¸½ËÚåğ	.Nnty™´¸ÅÊŞâö/             j              1O†‰PNG
+
+   IHDR   ˆ   –   2¸0‹   gAMA  ±üa   PLTE                                                                                                                                                                        ÿ¡5ÿ¡5ÿ¡5ÿ 5ÿš3ÿš3ÿš3ÿš3ÿš3ÿš3ÿ™2ÿ™2ÿ™2ÿ™2ÿ™2ÿ™2ÿ™2ÿ™2ÿ™2ş˜2ş˜2ş˜2ı˜2ü—1û–1÷”1ô’0í/êŒ.â‡,Õ€+Ï}*Æw)Âu)»r)¸r-·r-·q-¶q-¶q-µp*´p,²o,²o,³o,²o,²o,²o,²o,²o,³p,´p,´p-µp-µp,´o,²o,±n,±n,°m,°m,¯m,¯l+®l*­k)­j'©h'§f&¤e& c'b'œa'œa'œa'›`'›_%™^$—]$”[#’Z"X"W!‹U‰SˆSƒR&ƒR&„R'ƒR'„R'†Q…Q‚Q&‚Q&‚Q&€P%€P&€P&€P&€P&€P&€P&€P&€P&€P&€P&P&P&P&P&P&P&ƒO‚O‚OO€O €O"€O$O%O%O%O%~N$|M$xJ#wJ#vI#vH#uH"uH!tG sFqEpDmCkBkBjAi@e>c=`;^9[8Y7W6U5S3Q2L/I-D*@'=&;$8"6!30.+
+(	%	"
+
+
+
+		                                       2&ï   8tRNS        	 #',4>DNT\hpz„™¤­´½ÃÉÒİâåèêîñóùşZe™s   bKGD ˆH  àIDATxÚÅÜ[LÙğ¾ÍªxÙu]uUÄÚ®`–´™Çy›D+¤¤Ïç¡>L¢VØ˜UtuíBşN²'éÓşİİÌƒ·à.( H¡r“K¹XŠ!iG…øüı? ®(mçÓú{n&ŸœùÍé™3¿ß±pl±.k—–°0üvãŞ|«Õfµæïßù!ë³ À@ŞÎŸ²Ûğı×O——•W\îŒ 8zpKæ!Û€Éß%» J¢$
+’²¶ñ—@î–ÌBÖçƒ¿êDI|ÂÉò èàšÌA²rŠ¡õŸ>P,…½là%Šwge²Û•/·!	RÅ`İ™	È¶|`ò²}ÆR”\Ÿò¶¥r°üS‚˜($I(½É£07­¬àU¿Ó!&ÉáXDQöº´A²mÀH¹”ğ®¼—ˆ¦¤J"ÈÖ<ğ3×í)KÇï3ÀÁÍæCÖ,Ó)ˆzC(ı(<`2$+»/\IÔ’Ã5ôf5©²d§˜¨E‡(J¢tz°î0²5˜º^"²‡$Úÿˆ ¹_›É-Ãé$C¡´…7˜*Ë ë²‹Àc ãÖ¥r—S`$Gù£»Ö®
+²ËŠ¥U€Ù‰®ŠI*§¤Ê¿yàùHx(ø¤74>5`²¶T0rƒ-àÀfƒìãà®ÕÉ3^¯Ç[}ñz@¤ó¤‘$¸:€cûAö‚Ÿ¸â&ïC&nO`
+Ğ.9™k/íZÃÙ>pÈ„|HñTÿg_0ğ,KÂ‰Êğ‡·3B²Á÷T-c¼–@è/DÉ@ª´EıY á±‡¬gêz€X—(HFf•àø~H.Âçe’ Ü?¸äd€$ÉQ1ÆÃ¶cNÈà"I29{m
+˜¨12İ
+'jæÁúF¤ ½U2IF©êšú\FREptÌû¿ÔÙR¯')Â[ÛÄºNJWpt_jHÂ$eÈUõão«14Á•œãaÛ‘
+rígtHÈÙ_¢ÀX¥¡YådMü¡­I!_€¯&úÂİz¥ŠÔ9ìÛ’I·¬Ë!o]ˆv8ŒıõG÷&†@_Ñ²ûÊ¯9aäoÙ^9Æ'\ X¸üCô‡LÎıÆN˜U$ÁyaÅ+ŞË+M&Lœ:K¥ŠĞ• U,Y¶WWcxêúFREWpdÏ§ß¥ÎVH•ŸÃ@ÔĞ¬"Ùk&xşöcÈ¦#ó?v	9ÿg)·šUj5,_ X¾<2‘#”ª`èp9Qzcàs²–C^‚™º~`¶ÍĞªI({
+X7›!„Èî_&™JÉĞĞ¥ Û‘Éù¿bÀH¹ÃÈPi/pÀ!2!ı1 ÍĞ¬âh[Ä»ÒÕB!g~ fÿk70ë5<òLƒ²”*§ÙSEr\Xx{wLÈ¤úoo†Ëì’š…¥Œ5Bˆì•Cq ¥ÔÁ'Àó D&äâ ¹å`MZG
+Ö˜!D–İMErÍï0BñV· bÜºo2„ÈŞ³OãÀ­R¦„S<6™!2ñÖ?¦o”°¬ú°ßl!„¸ÿfÛ.àp: 2©nYÀ+ı;ÆRYÜ¶>D®ûÑKdöT©Ô€ß:‡Ä5{ô«³‘¹ Û€„xzuşı¸f
+·¦€œ0ÿç9æÛã© ÚzGd¦h[jˆ„®’e–ñp·E€¡2½ÏpÙ‹ãß¤†ÜÖ€¾:İ©"re˜¾l×=—T@Dyğ˜ïõè“ÈÚ‘WÀu–=7õA¨ÚĞşˆ\;—’"ËŞÚ -TÊ²4±‡uB¨ê¿Ó½Œ×»SNf-3Àh9ÓºQ¨^¥TQ†5 XçIcÀÔÕï÷ÇX *õ7Ñ„³Šì©Ò€§ØŒ’X¥Tõ= ‘kòŠou°*e^-:c2A¨ê¿Ó­áÍx½GştQôÏs`¤œõK (Aäş„RÕç™ôÔ.›UdBê‡™öw±Úƒ&f¥Ty8D;?HùLõ€Ü:e`“\jB©ïq˜~—*²·ºxÍø™øİVVĞİ „¨Ê'À›Ñº*™âşk
+³®˜—®1 ›ªFG„RU¹ıLºj=Şú`æ¦‘M`Qªb­*5¡*¥ÍãÀl—¥ò¿ŸğpUéj ”ªªïI ¼gŠ¢$”Ş ´AEUé*!”RåN?Pal“æê~¨¼½Ò*!”>¾7²mU1
+Ì>ñ½¿Îj!şGÀ÷ìÉQz	ïú—nËç‚ÎëÀÂø}EıàB‡H¢ıê40ùÈO?td"‰bÙú–32‘Î>è»§|r¡LB$áÔU`qünã
+ÊDíµ“Àt«úñ]É(D…²`>èKp¡A$ÁÙúï*¿©Ÿ"I‚óòk,†(jÂedDJ.„H;Mi‡H¢Pæú|TıœIzb@¨IIÊH;Dp^njHÁH/D’5@¤]¥)i„H¢à
+±P£¥MsÇ·¤"	'ºbÀÓû
+Õb)7óŒ@$Áy!†7“U}õ‘–r{Ó¤¤r˜¨T§ƒÒîÔ¾¬i©:c>ä£ºCõ¦Şg„H‚Ğ›ıÃAé]›Í…'jâÀT«AA©2ŒÎLˆä¨æX’ƒRJÕq~‡y·U^ñA…A©2ŠCkMƒH‚£ã0Ü¤PÆh_q&A–Ê»0İêû‘¡*EìæÌ‚Ø+F€xà¶_e_‹ÈåL‚8\@|°A• |Î$ˆĞ67ù)³Cm-"o­9’Ê`ºİÇ>ªroÈÕY¶‘
+²0 h$¥¾î(Ã™âÃ~#¥y°nÕ]ì”|£¦	mVØª_Ñ€=YúË¿’BÔÆ'í>#Œ;İÚ'õÇ)
+â’ˆjä®¨¾Àój'-Y6íŠQˆÑ şÏø•
+-k“Mšñ7Æı›˜ËHM…¨şÛ5ğ‡¾NTXôd¢6´O'.×·pÙ'.56¢<ïK\j¼6YñµY•úãI[:,gE›7½•ŞÌ¥hr±pÜL¤yD|­S<îü"UËBQ¬^ND¥JÓ F(Çq‡ğÄ#§	¢RßÓ˜Ö0Çq;º4ˆ_ÌãÓçD>1qNNDıõÑ#;×êí8ÚtœxÌ†¨Tizª¿¡r©l7øÎ{}ŒCTÚŠ¹›ÙÚãöo?»Â7£•ªí³L”ï÷«ûôÙ94š9šÃ`kC~ßB™S¾ó‡§Øsq4ø[iz
+gë¶ı·©tsøÙÊCÎFÑÊıó ëY–ôÇ¯,+‘'`dĞöˆ‘æ}Ëò#x,×~ğüÈÏĞËöÖÔæQh Gİ²Â!?xßQä~„t¯UÕ¯ŸGaîf4§oÏfş÷¾¼ªcúê¾à·Õ¬vıl0q…,¥ÊŸˆê{»V©Úú|';X}2\{F&„TÍ~]oö÷Ã«9eå#²òŠÁ·U{eÙ=Ša¯úÊ½~ h5§XÃGZÜÄ{‹wSŞ•Æào49Rû±ÛŒÖ2‰ šbæhlÙi;eı@8ßh²/Pªro|Å9«=3'éÑ0ëòŠÁw¼Æ`câ—·»AEy«? +Åa9Û½Tµb4ôÎÛ9.İËùàµ‡JÚ’C÷Jë÷ ¼ø4OšÆ5ğ9ë3wÄÔÆ‚bğ}w>ØeW©rûÑPœgÒ¹NzİúÖ
+ÌŸ²” ¾¦Ğ´ÜÆq™…pÜŞï ~´·õÑÃG­İƒ³ åoç¸ÌC¸»­ øEm€üì¯8î³@8Ûº¯Àj³Ù¬‡ìâLÛÏ×dee­áÒÿ>ù‰´ú„ô    IEND®B`‚Yimage/png_#http://loup-vaillant.fr/penrose.png    1 < N d ‚ ‘ ¨+ê+ô+ú,;,<,?,H,^0Ó6ä6í77;CJÍJ×                           Jı

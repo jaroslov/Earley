@@ -1,0 +1,478 @@
+bplist00Ò_WebMainResource_WebSubresourcesÕ	
+_WebResourceData_WebResourceMIMEType_WebResourceTextEncodingName^WebResourceURL_WebResourceFrameNameO,-<!DOCTYPE html><html><head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <link rel="stylesheet" href="/style.css">
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <link rel="alternate" type="application/atom+xml" href="/updates.xml">
+    <title>
+Empty Rules
+</title>
+    <meta name="description" content="
+Time to fix that bug.  Our recogniser is now fully general.
+">
+  </head>
+  <body>
+    <header>
+      <img id="logo" width="136" height="150" border="0" src="/penrose.png" alt="logo">
+      <h1>@ Loup's</h1>
+      <blockquote><p>Impossible?  Like that would stop me.</p></blockquote>
+    </header>
+
+    <article> 
+<h1>Earley Parsing Explained â€” Empty Rules</h1>
+
+<p>As before, the impatient and the expert can read the
+<a href="empty-rules.lua">source code</a> before the manual.</p>
+
+<h2>The bug</h2>
+
+<p>I told you last time there was a bug.  Look at the following grammar
+(let us assume the start symbol is <code>A</code>):</p>
+
+<pre><code>A -&gt;
+A -&gt; B
+B -&gt; A
+</code></pre>
+
+<p>It's an uninteresting, trivial grammar that parses the empty string,
+but that's enough for our purposes.  You will notice that this grammar
+is ambiguous: there are several syntax trees we could derive from an
+empty input.  Well, a countable infinity of them, in fact:</p>
+
+<pre><code>â”Œâ”€â”€â”€â”     â”Œâ”€â”€â”€â”     â”Œâ”€â”€â”€â”
+â”‚ A â”‚     â”‚ A â”‚     â”‚ A â”‚     ...
+â””â”€â”€â”€â”˜     â””â”€â”¬â”€â”˜     â””â”€â”¬â”€â”˜
+          â”Œâ”€â”´â”€â”     â”Œâ”€â”´â”€â”
+          â”‚ B â”‚     â”‚ B â”‚
+          â””â”€â”¬â”€â”˜     â””â”€â”¬â”€â”˜
+          â”Œâ”€â”´â”€â”     â”Œâ”€â”´â”€â”
+          â”‚ A â”‚     â”‚ A â”‚
+          â””â”€â”€â”€â”˜     â””â”€â”¬â”€â”˜
+                    â”Œâ”€â”´â”€â”
+                    â”‚ B â”‚
+                    â””â”€â”¬â”€â”˜
+                    â”Œâ”€â”´â”€â”
+                    â”‚ A â”‚
+                    â””â”€â”€â”€â”˜
+</code></pre>
+
+<p>But, when you use our Earley recogniser on this grammar, you get the
+following items:</p>
+
+<pre><code>=== 0 ===
+A -&gt; â€¢    (0)
+A -&gt; â€¢ B  (0)
+B -&gt; â€¢ A  (0)
+</code></pre>
+
+<p>Here, we can see only one completed item:</p>
+
+<pre><code>A -&gt; â€¢ (0)
+</code></pre>
+
+<p>Which means, the subsequent parser will only see <em>one</em> possible parse:</p>
+
+<pre><code>â”Œâ”€â”€â”€â”
+â”‚ A â”‚
+â””â”€â”€â”€â”˜
+</code></pre>
+
+<p>So we have a bug.</p>
+
+<h2>The problem</h2>
+
+<p>The problem comes from the poor timing around the handling of empty
+rules.  Let's take a look at the items one more time:</p>
+
+<pre><code>=== 0 ===
+A -&gt; â€¢    (0)
+A -&gt; â€¢ B  (0)
+B -&gt; â€¢ A  (0)
+</code></pre>
+
+<p>See the last item?  It calls for completion:  <code>A</code> has been completed
+earlier, with item <code>A&nbsp;-&gt;&nbsp;â€¢&nbsp;(0)</code>.  So, <code>B&nbsp;-&gt;&nbsp;â€¢&nbsp;A&nbsp;(0)</code> should be
+advanced one step.  We should add this item:</p>
+
+<pre><code>B -&gt; A â€¢ (0)
+</code></pre>
+
+<p>And this one as well, while we're at it:</p>
+
+<pre><code>A -&gt; B â€¢ (0)
+</code></pre>
+
+<p>But as I said, there's a timing problem.  When the completion step is
+triggered, the state set looks like this:</p>
+
+<pre><code>=== 0 ===
+A -&gt; â€¢    (0)  &lt;- completion to perform
+A -&gt; â€¢ B  (0)
+</code></pre>
+
+<p>Nice, a completion! Let's look at all the items of the form:</p>
+
+<pre><code>R -&gt; Î± â€¢ A Î² (j)
+</code></pre>
+
+<p>When you think about it, there is one:</p>
+
+<pre><code>B -&gt; â€¢ A  (0)
+</code></pre>
+
+<p>But guess what, it doesn't exist yet.  It will be predicted <em>later</em>,
+by the second item of the set.  So we can't advance it, and miss
+another completion in the process.</p>
+
+<p>Ordinarily, it is not possible for a completed item to be created
+before the items it is supposed to advance one step: they belong to a
+later Earley set: by the time a later Earley set i being processed,
+the previous ones are done.  Unfortunately, empty rules break that
+assumption: now we look for items in a set that is not fully built
+yet!  Of course we could miss something.</p>
+
+<h2>The solution</h2>
+
+<p>One obvious solution was given by <a href="http://dickgrune.com/Books/PTAPG_1st_Edition/">Grune and Jacob (1990)</a>:</p>
+
+<blockquote>
+  <p>The easiest way to handle this mareâ€™s nest is to stay calm and keep
+running the Predictor and Completer in turn until neither has
+anything more to add</p>
+</blockquote>
+
+<p>Ah, but I don't like this <em>at all</em>.  One thing I liked about our
+algorithm, was the ability to process the Earley sets in one pass.
+With this method, we have to loop at least twice, add another nesting
+to our loopsâ€¦ <em>Yuck.</em></p>
+
+<p>The <em>real</em> solution came from <a href="https://courses.engr.illinois.edu/cs421/sp2012/project/PracticalEarleyParsing.pdf">Aycock and Horspool (2002)</a>.
+They noticed we could advance some items without waiting for a
+completion to trigger that advancement.  More precisely, some symbols
+are <em>nullable</em>: they can parse the empty string.  Hence the trick:</p>
+
+<p><em>When performing a prediction, if the predicted symbol is nullable,
+then advance the predictor one step.</em></p>
+
+<p>Let's say for instance we're processing the second item:</p>
+
+<pre><code>=== 0 ===
+A -&gt; â€¢    (0)
+A -&gt; â€¢ B  (0)  &lt;- needs a prediction.
+</code></pre>
+
+<p>So we need to predict the symbol <code>B</code>.  <code>B</code> happens to be nullable.
+So, we can advance <code>A&nbsp;-&gt;&nbsp;â€¢&nbsp;B&nbsp;(0)</code> without waiting for something like
+<code>B&nbsp;-&gt;&nbsp;Î±&nbsp;â€¢&nbsp;(0)</code> to appear.  It <em>will</em> come up eventually, so we might
+as well anticipate the completion.  So there's <em>two</em> things happening
+in the predictor: the actual prediction, and a magical completion:</p>
+
+<pre><code>=== 0 ===
+A -&gt; â€¢    (0)
+A -&gt; â€¢ B  (0)  &lt;- predictor
+B -&gt; â€¢ A  (0)  &lt;- predicted from the predictor
+A -&gt; B â€¢  (0)  &lt;- magical completion of the predictor
+</code></pre>
+
+<p>Now, we can keep processing the Earley sets in one pass.  Don't worry,
+Aycock and Horspool have proven this trick works.  There's just one
+last hurdleâ€¦</p>
+
+<h2>Detecting nullable symbols</h2>
+
+<p>A nullable symbols is a symbol that name at least one nullable rule.
+And a nullable rule is only composed of nullable symbols.  (Possibly
+zero, which makes the rule empty.)  Terminal symbols aren't nullable.</p>
+
+<p>There are several ways to do this.  I personally have chosen to just
+scan every rule, and maintain a list of nullable symbols in the
+process.  If a rule is empty, or contains only symbols from the
+nullable set, then I add its name to the nullable set.  And I keep
+scanning all the rules over and over, until the nullable set no longer
+grows.</p>
+
+<p>This is simple, but slow.  Quadratic with respect to the size of the
+grammar, in fact.  We can beat this.  In his Marpa parser, Jeffrey
+Kegler has devised <a href="https://github.com/jeffreykegler/kollos/blob/master/notes/misc/loup2.md">an alternative</a> which should work in linear
+time.  If you intend to process large grammars (eventually you will),
+you should take a look.</p>
+
+<p>Anyway, now that I have a nullable set, I can just use it to test if a
+symbol is nullable when I make a prediction.</p>
+
+<h2>Lua code</h2>
+
+<p>The code is very simple.  I only have made 2 additions to the
+recogniser.  First, the detection of of the nullable set:</p>
+
+<pre><code>---------------------------
+-- Detecting nullable rules -- Nullable symbols sets are named "nss".
+---------------------------
+local function nullable_nss()
+   return { size = 0 }
+end
+
+local function add_nullable_rule(rule_name, nss)
+   if nss[rule_name] then return end  -- Do nothing for known nullable rules.
+   nss[rule_name] = true              -- The others are added,
+   nss.size = nss.size + 1            -- and the size is adjusted.
+end
+
+-- Returns true if it can say for sure the rule is nullable.
+-- Returns false otherwise
+local function is_nullable(rule, nss)
+   for i = 1, #rule do
+      if not nss[rule[i]] then
+         return false
+      end
+   end
+   return true
+end
+
+-- Adds nullable rules to the nss, by examining them in one pass.
+local function update_nss(nss, grammar)
+   for i = 1, #grammar do                     -- For each rule,
+      if is_nullable(grammar[i], nss) then       -- if the rule is nullable for sure,
+         add_nullable_rule(grammar[i].name, nss) -- add it to the nss.
+      end
+   end
+end
+
+local function nullable_rules(grammar)
+   local nss = nullable_nss()
+   repeat                      -- Keep...
+      local old_size = nss.size
+      update_nss(nss, grammar) -- ...updating the nss,
+   until old_size == nss.size  -- as long as it keeps growing.
+   return nss                  -- An nss that stopped growing is complete.
+end
+</code></pre>
+
+<p>Then, the addition of the magic completion in the prediction step:</p>
+
+<pre><code>local function predict(S, i, j, symbol, grammar, nss)
+   for rule_index, rule in ipairs(grammar) do
+      if rule.name == symbol then
+         append(S[i], { rule  = rule_index,
+                        next  = 1 ,
+                        start = i })
+         if nss[rule.name] then -- magical completion
+            append(S[i], { rule  = S[i][j].rule,
+                           next  = S[i][j].next + 1,
+                           start = S[i][j].start})
+         end
+      end
+   end
+end
+</code></pre>
+
+<p>And that's basically it.  As before, the
+<a href="empty-rules.lua">full source code</a> is available.</p>
+
+ </article>
+
+    <nav>
+      <a href="/">Home</a>
+      
+<ul>
+<li>
+<a href="/articles/">
+My essays/
+</a>
+
+</li>
+<li>
+<a href="/projects/">
+Projects/
+</a>
+
+</li>
+<li>
+<a href="/tutorials/">
+Tutorials/
+</a>
+<ul>
+<li>
+<a href="/tutorials/poly1305-design">
+The design of Poly1305
+</a>
+
+</li>
+<li>
+<a href="/tutorials/chacha20-design">
+The design of Chacha20
+</a>
+
+</li>
+<li>
+<a href="/tutorials/monty-hall">
+Monty Hall: the Complete and Definitive Solution
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/">
+Earley Parsing Explained/
+</a>
+<ul>
+<li>
+<a href="/tutorials/earley-parsing/what-and-why">
+What is Earley parsing, and why you should care?
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/chart-parsing">
+Chart Parsing
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/recogniser">
+The Recogniser
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/empty-rules">
+Empty Rules
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/right-recursion">
+Optimising Right Recursion
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/parser">
+The Parser
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/semantic-actions">
+Semantic Actions
+</a>
+
+</li>
+</ul>
+</li>
+<li>
+<a href="/tutorials/avoid-assignment">
+How to avoid the assignment statement
+</a>
+
+</li>
+<li>
+<a href="/tutorials/from-imperative-to-functional">
+From Imperative to Functional: how to make the leap.
+</a>
+
+</li>
+<li>
+<a href="/tutorials/ultimate-css-layout">
+My ultimate CSS layout
+</a>
+
+</li>
+</ul>
+</li>
+<li>
+<a href="/contact">
+Contact me
+</a>
+
+</li>
+</ul>
+
+    </nav>
+
+    <footer>
+      Contact, suggestions: Send me an email at
+      <a href="mailto:l@loup-vaillant.fr">l@loup-vaillant.fr</a><br>
+      <a href="/updates">Atom feed</a><br>
+      Built with <a href="/projects/ussm">USSM</a>
+    </footer>
+  
+
+
+</body></html>Ytext/htmlUUTF-8_<http://loup-vaillant.fr/tutorials/earley-parsing/empty-rulesP¢Ô_WebResourceResponseOqbplist00ÔnoX$versionX$objectsY$archiverT$top † ¯!#)*0123OPQRSTUVWXYZ[\]^_`abcdeiU$nullİ	
+ !"R$6S$10R$2R$7R$3S$11R$8V$classR$4R$9R$0R$5R$1€	€€€ € €€€Ó$%'(WNS.base[NS.relative€ €€_!http://loup-vaillant.fr/style.cssÒ+,-.Z$classnameX$classesUNSURL¢-/XNSObject#A¾j![y ÈÓ456BNWNS.keysZNS.objects«789:;<=>?@A€	€
+€€€€€€€€€«CEFGHIJKLM€€€€€€€€€€€€VServer\Content-TypeTVary]Last-ModifiedTEtag]Accept-RangesTDate_Content-Encoding^Content-LengthZKeep-AliveZConnection_Apache/2.2.16 (Debian)Xtext/css_Accept-Encoding_Mon, 29 Jun 2015 09:44:54 GMT_"32ad-60d-519a4f11b9180"Ubytes_Tue, 28 Feb 2017 21:32:33 GMTTgzipS548_timeout=15, max=100ZKeep-AliveÒ+,fg_NSMutableDictionary£fh/\NSDictionaryÒ+,jk_NSHTTPURLResponse£lm/_NSHTTPURLResponse]NSURLResponse_NSKeyedArchiverÑpq_WebResourceResponse€    # - 2 7 [ a |  ƒ † ‰ Œ  “ š    £ ¦ © « ­ ¯ ± ³ ´ ¶ ¸ º ¼ ¾ À Â É Ñ İ ß á ã &)2;=?FNYegikmoqsuwy{‡‰‹‘“•—™›Ÿ¦³¸ÆËÙŞñ /8Jj…‹«°´ÊÕÚğô2@RUk             r              mO/* reset */
+header, nav, article, footer, body, html, pre code
+{ display:block; margin:0; color:black; }
+
+/* colors */
+html, body { background-color:#fff8f0; }
+footer     { background-color:#f0e4d0; }
+pre code   { background-color:#f0e4d0; }
+
+/* round corners, margins */
+html     { margin:1.5em }
+footer   { border-radius        : 1.5em;
+           -moz-border-radius   : 1.5em;
+           -webkit-border-radius: 1.5em;
+           margin-bottom: 1.5em; padding: 1em; }
+pre code { border-radius        : 1em;
+           -moz-border-radius   : 1em;
+           -webkit-border-radius: 1em;
+           margin: 1em 0 1em 0;
+           padding:0.5em;}
+nav ul   { margin:  0;
+           padding: 0 0 0 1em; }
+header, nav, article { margin-bottom: 1.5em;
+                       padding: 1em; }
+
+/* style */
+a:visited         { color: #822; }
+a:hover           { color: #f50; }
+code              { font-size: 120%; }
+nav a             { text-decoration: none; }
+nav ul, footer    { font-size: 0.83em; }
+nav ul ul         { font-size: 1em; }
+header blockquote { font-style: italic; } /* slogan */
+header #logo      { float: right;
+                    margin-bottom: 2em; }
+h1                { font-size: 180% }
+table tr td       { text-align: center;
+                    padding: 5px; }
+table tr th       { text-align: center;
+                    padding: 5px; }
+
+/* layout */
+body    { width: 63em; margin: auto; }
+article { float:left; margin-left:  18em; width: 42em;   }
+nav     { float:left; margin-left: -61em; width: 14.5em; }
+footer  { clear: both; }
+Xtext/css_!http://loup-vaillant.fr/style.cssÔO%bplist00ÔfgX$versionX$objectsY$archiverT$top † ¯#)*0123KLMNOPQRSTUVWXYZ[\]aU$nullİ	
+ !"R$6S$10R$2R$7R$3S$11R$8V$classR$4R$9R$0R$5R$1€	€€€ €€€€Ó$%'(WNS.base[NS.relative€ €€_#http://loup-vaillant.fr/penrose.pngÒ+,-.Z$classnameX$classesUNSURL¢-/XNSObject#A¾j![ ÈÓ456@JWNS.keysZNS.objects©789:;<=>?€	€
+€€€€€€€©ACDEFGHI€€€€€€€€€€VServer\Content-TypeTEtag]Last-ModifiedTDate]Accept-Ranges^Content-LengthZKeep-AliveZConnection_Apache/2.2.16 (Debian)Yimage/png_"22e3-f86-4ba5de191db80"_Sat, 03 Mar 2012 22:04:46 GMT_Fri, 03 Mar 2017 21:54:23 GMTUbytesT3974_timeout=15, max=98ZKeep-AliveÒ+,^__NSMutableDictionary£^`/\NSDictionaryÒ+,bc_NSHTTPURLResponse£de/_NSHTTPURLResponse]NSURLResponse_NSKeyedArchiverÑhi_WebResourceResponse€    # - 2 7 W ] x {  ‚ … ˆ Œ  – ™ œ Ÿ ¢ ¥ § © « ­ ¯ ° ² ´ ¶ ¸ º ¼ ¾ Å Í Ù Û İ ß
+$'09;=DLWacegikmoqs}ƒ…‡‰‹‘˜¥ª¸½ËÚåğ	.Nnty™´¸ÅÊŞâö/             j              1O†‰PNG
+
+   IHDR   ˆ   –   2¸0‹   gAMA  ±üa   PLTE                                                                                                                                                                        ÿ¡5ÿ¡5ÿ¡5ÿ 5ÿš3ÿš3ÿš3ÿš3ÿš3ÿš3ÿ™2ÿ™2ÿ™2ÿ™2ÿ™2ÿ™2ÿ™2ÿ™2ÿ™2ş˜2ş˜2ş˜2ı˜2ü—1û–1÷”1ô’0í/êŒ.â‡,Õ€+Ï}*Æw)Âu)»r)¸r-·r-·q-¶q-¶q-µp*´p,²o,²o,³o,²o,²o,²o,²o,²o,³p,´p,´p-µp-µp,´o,²o,±n,±n,°m,°m,¯m,¯l+®l*­k)­j'©h'§f&¤e& c'b'œa'œa'œa'›`'›_%™^$—]$”[#’Z"X"W!‹U‰SˆSƒR&ƒR&„R'ƒR'„R'†Q…Q‚Q&‚Q&‚Q&€P%€P&€P&€P&€P&€P&€P&€P&€P&€P&€P&P&P&P&P&P&P&ƒO‚O‚OO€O €O"€O$O%O%O%O%~N$|M$xJ#wJ#vI#vH#uH"uH!tG sFqEpDmCkBkBjAi@e>c=`;^9[8Y7W6U5S3Q2L/I-D*@'=&;$8"6!30.+
+(	%	"
+
+
+
+		                                       2&ï   8tRNS        	 #',4>DNT\hpz„™¤­´½ÃÉÒİâåèêîñóùşZe™s   bKGD ˆH  àIDATxÚÅÜ[LÙğ¾ÍªxÙu]uUÄÚ®`–´™Çy›D+¤¤Ïç¡>L¢VØ˜UtuíBşN²'éÓşİİÌƒ·à.( H¡r“K¹XŠ!iG…øüı? ®(mçÓú{n&ŸœùÍé™3¿ß±pl±.k—–°0üvãŞ|«Õfµæïßù!ë³ À@ŞÎŸ²Ûğı×O——•W\îŒ 8zpKæ!Û€Éß%» J¢$
+’²¶ñ—@î–ÌBÖçƒ¿êDI|ÂÉò èàšÌA²rŠ¡õŸ>P,…½là%Šwge²Û•/·!	RÅ`İ™	È¶|`ò²}ÆR”\Ÿò¶¥r°üS‚˜($I(½É£07­¬àU¿Ó!&ÉáXDQöº´A²mÀH¹”ğ®¼—ˆ¦¤J"ÈÖ<ğ3×í)KÇï3ÀÁÍæCÖ,Ó)ˆzC(ı(<`2$+»/\IÔ’Ã5ôf5©²d§˜¨E‡(J¢tz°î0²5˜º^"²‡$Úÿˆ ¹_›É-Ãé$C¡´…7˜*Ë ë²‹Àc ãÖ¥r—S`$Gù£»Ö®
+²ËŠ¥U€Ù‰®ŠI*§¤Ê¿yàùHx(ø¤74>5`²¶T0rƒ-àÀfƒìãà®ÕÉ3^¯Ç[}ñz@¤ó¤‘$¸:€cûAö‚Ÿ¸â&ïC&nO`
+Ğ.9™k/íZÃÙ>pÈ„|HñTÿg_0ğ,KÂ‰Êğ‡·3B²Á÷T-c¼–@è/DÉ@ª´EıY á±‡¬gêz€X—(HFf•àø~H.Âçe’ Ü?¸äd€$ÉQ1ÆÃ¶cNÈà"I29{m
+˜¨12İ
+'jæÁúF¤ ½U2IF©êšú\FREptÌû¿ÔÙR¯')Â[ÛÄºNJWpt_jHÂ$eÈUõão«14Á•œãaÛ‘
+rígtHÈÙ_¢ÀX¥¡YådMü¡­I!_€¯&úÂİz¥ŠÔ9ìÛ’I·¬Ë!o]ˆv8ŒıõG÷&†@_Ñ²ûÊ¯9aäoÙ^9Æ'\ X¸üCô‡LÎıÆN˜U$ÁyaÅ+ŞË+M&Lœ:K¥ŠĞ• U,Y¶WWcxêúFREWpdÏ§ß¥ÎVH•ŸÃ@ÔĞ¬"Ùk&xşöcÈ¦#ó?v	9ÿg)·šUj5,_ X¾<2‘#”ª`èp9Qzcàs²–C^‚™º~`¶ÍĞªI({
+X7›!„Èî_&™JÉĞĞ¥ Û‘Éù¿bÀH¹ÃÈPi/pÀ!2!ı1 ÍĞ¬âh[Ä»ÒÕB!g~ fÿk70ë5<òLƒ²”*§ÙSEr\Xx{wLÈ¤úoo†Ëì’š…¥Œ5Bˆì•Cq ¥ÔÁ'Àó D&äâ ¹å`MZG
+Ö˜!D–İMErÍï0BñV· bÜºo2„ÈŞ³OãÀ­R¦„S<6™!2ñÖ?¦o”°¬ú°ßl!„¸ÿfÛ.àp: 2©nYÀ+ı;ÆRYÜ¶>D®ûÑKdöT©Ô€ß:‡Ä5{ô«³‘¹ Û€„xzuşı¸f
+·¦€œ0ÿç9æÛã© ÚzGd¦h[jˆ„®’e–ñp·E€¡2½ÏpÙ‹ãß¤†ÜÖ€¾:İ©"re˜¾l×=—T@Dyğ˜ïõè“ÈÚ‘WÀu–=7õA¨ÚĞşˆ\;—’"ËŞÚ -TÊ²4±‡uB¨ê¿Ó½Œ×»SNf-3Àh9ÓºQ¨^¥TQ†5 XçIcÀÔÕï÷ÇX *õ7Ñ„³Šì©Ò€§ØŒ’X¥Tõ= ‘kòŠou°*e^-:c2A¨ê¿Ó­áÍx½GştQôÏs`¤œõK (Aäş„RÕç™ôÔ.›UdBê‡™öw±Úƒ&f¥Ty8D;?HùLõ€Ü:e`“\jB©ïq˜~—*²·ºxÍø™øİVVĞİ „¨Ê'À›Ñº*™âşk
+³®˜—®1 ›ªFG„RU¹ıLºj=Şú`æ¦‘M`Qªb­*5¡*¥ÍãÀl—¥ò¿ŸğpUéj ”ªªïI ¼gŠ¢$”Ş ´AEUé*!”RåN?Pal“æê~¨¼½Ò*!”>¾7²mU1
+Ì>ñ½¿Îj!şGÀ÷ìÉQz	ïú—nËç‚ÎëÀÂø}EıàB‡H¢ıê40ùÈO?td"‰bÙú–32‘Î>è»§|r¡LB$áÔU`qünã
+ÊDíµ“Àt«úñ]É(D…²`>èKp¡A$ÁÙúï*¿©Ÿ"I‚óòk,†(jÂedDJ.„H;Mi‡H¢Pæú|TıœIzb@¨IIÊH;Dp^njHÁH/D’5@¤]¥)i„H¢à
+±P£¥MsÇ·¤"	'ºbÀÓû
+Õb)7óŒ@$Áy!†7“U}õ‘–r{Ó¤¤r˜¨T§ƒÒîÔ¾¬i©:c>ä£ºCõ¦Şg„H‚Ğ›ıÃAé]›Í…'jâÀT«AA©2ŒÎLˆä¨æX’ƒRJÕq~‡y·U^ñA…A©2ŠCkMƒH‚£ã0Ü¤PÆh_q&A–Ê»0İêû‘¡*EìæÌ‚Ø+F€xà¶_e_‹ÈåL‚8\@|°A• |Î$ˆĞ67ù)³Cm-"o­9’Ê`ºİÇ>ªroÈÕY¶‘
+²0 h$¥¾î(Ã™âÃ~#¥y°nÕ]ì”|£¦	mVØª_Ñ€=YúË¿’BÔÆ'í>#Œ;İÚ'õÇ)
+â’ˆjä®¨¾Àój'-Y6íŠQˆÑ şÏø•
+-k“Mšñ7Æı›˜ËHM…¨şÛ5ğ‡¾NTXôd¢6´O'.×·pÙ'.56¢<ïK\j¼6YñµY•úãI[:,gE›7½•ŞÌ¥hr±pÜL¤yD|­S<îü"UËBQ¬^ND¥JÓ F(Çq‡ğÄ#§	¢RßÓ˜Ö0Çq;º4ˆ_ÌãÓçD>1qNNDıõÑ#;×êí8ÚtœxÌ†¨Tizª¿¡r©l7øÎ{}ŒCTÚŠ¹›ÙÚãöo?»Â7£•ªí³L”ï÷«ûôÙ94š9šÃ`kC~ßB™S¾ó‡§Øsq4ø[iz
+gë¶ı·©tsøÙÊCÎFÑÊıó ëY–ôÇ¯,+‘'`dĞöˆ‘æ}Ëò#x,×~ğüÈÏĞËöÖÔæQh Gİ²Â!?xßQä~„t¯UÕ¯ŸGaîf4§oÏfş÷¾¼ªcúê¾à·Õ¬vıl0q…,¥ÊŸˆê{»V©Úú|';X}2\{F&„TÍ~]oö÷Ã«9eå#²òŠÁ·U{eÙ=Ša¯úÊ½~ h5§XÃGZÜÄ{‹wSŞ•Æào49Rû±ÛŒÖ2‰ šbæhlÙi;eı@8ßh²/Pªro|Å9«=3'éÑ0ëòŠÁw¼Æ`câ—·»AEy«? +Åa9Û½Tµb4ôÎÛ9.İËùàµ‡JÚ’C÷Jë÷ ¼ø4OšÆ5ğ9ë3wÄÔÆ‚bğ}w>ØeW©rûÑPœgÒ¹NzİúÖ
+ÌŸ²” ¾¦Ğ´ÜÆq™…pÜŞï ~´·õÑÃG­İƒ³ åoç¸ÌC¸»­ øEm€üì¯8î³@8Ûº¯Àj³Ù¬‡ìâLÛÏ×dee­áÒÿ>ù‰´ú„ô    IEND®B`‚Yimage/png_#http://loup-vaillant.fr/penrose.png    1 < N d ‚ ‘ ¨,Ù,ã,é-(-)-,-5-K1À7Ñ7Ú7ş8<0KºKÄ                           Kê

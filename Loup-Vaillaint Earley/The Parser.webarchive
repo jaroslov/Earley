@@ -1,0 +1,1352 @@
+bplist00Ò_WebMainResource_WebSubresourcesÕ	
+_WebResourceData_WebResourceMIMEType_WebResourceTextEncodingName^WebResourceURL_WebResourceFrameNameOÃ]<!DOCTYPE html><html><head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <link rel="stylesheet" href="/style.css">
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <link rel="alternate" type="application/atom+xml" href="/updates.xml">
+    <title>
+The Parser
+</title>
+    <meta name="description" content="
+Now we can construct the abstract syntax tree.  We will also learn to deal with ambiguity, mostly through prioritised choice.
+">
+  </head>
+  <body>
+    <header>
+      <img id="logo" width="136" height="150" border="0" src="/penrose.png" alt="logo">
+      <h1>@ Loup's</h1>
+      <blockquote><p>Impossible?  Like that would stop me.</p></blockquote>
+    </header>
+
+    <article> 
+<h1>Earley Parsing Explained â€” The Parser</h1>
+
+<p>We got ourselves a nice recogniser, but most of the time we want more
+than a binary answer.  We need a parse tree.</p>
+
+<p>So, how do we turn our recogniser into a parser?  Let's seeâ€¦ Earley
+himself devised a method, but he was proven wrong by Tomita.  Tomita's
+method doesn't terminate on some grammars.  Elizabeth Scott described
+<a href="http://www.sciencedirect.com/science/article/pii/S1571066108001497">a method that works</a>, but I totally failed to comprehend it.</p>
+
+<p>Turns out, I don't need to.  It all boils down to a simple insight:
+the Earley items produced by the recogniser are enough.  <em>They</em> are
+the parse forest we need.  And it is quite simple to extract a parse
+tree from that forest.  (Again, this insight is not mine.  I believe I
+picked it up from Ian Piumarta.)</p>
+
+<h2>The solution</h2>
+
+<p>We need to perform nested depth-first searches over the completed
+items.  When you look at those items the right way, you can see the
+search graphs.  It is not easy to see if your mind has been polluted by
+talks of back pointers or some such.  It certainly took <em>me</em> a long
+time.</p>
+
+<p>Now the question is, <em>how the hell</em> are we supposed to look at our
+Earley items?</p>
+
+<h2>Analysing the Earley states</h2>
+
+<p>This is best shown by example.  Let's conjure up our trusty arithmetic
+expression grammar:</p>
+
+<pre><code>Sum     -&gt; Sum     [+-] Product
+Sum     -&gt; Product
+Product -&gt; Product [*/] Factor
+Product -&gt; Factor
+Factor  -&gt; '(' Sum ')'
+Factor  -&gt; Number
+Number  -&gt; [0-9] Number
+Number  -&gt; [0-9]
+</code></pre>
+
+<p>When we use it on this input:</p>
+
+<pre><code>1+(2*3-4)
+</code></pre>
+
+<p>We get those Earley items.</p>
+
+<pre><code>=== 0 ===
+Sum     -&gt; â€¢ Sum [+-] Product     (0)
+Sum     -&gt; â€¢ Product              (0)
+Product -&gt; â€¢ Product [*/] Factor  (0)
+Product -&gt; â€¢ Factor               (0)
+Factor  -&gt; â€¢ '(' Sum ')'          (0)
+Factor  -&gt; â€¢ Number               (0)
+Number  -&gt; â€¢ [0-9] Number         (0)
+Number  -&gt; â€¢ [0-9]                (0)
+
+=== 1 ===
+Number  -&gt; [0-9] â€¢ Number         (0)
+Number  -&gt; [0-9] â€¢                (0)
+Number  -&gt; â€¢ [0-9] Number         (1)
+Number  -&gt; â€¢ [0-9]                (1)
+Factor  -&gt; Number â€¢               (0)
+Product -&gt; Factor â€¢               (0)
+Sum     -&gt; Product â€¢              (0)
+Product -&gt; Product â€¢ [*/] Factor  (0)
+Sum     -&gt; Sum â€¢ [+-] Product     (0)
+
+=== 2 ===
+Sum     -&gt; Sum [+-] â€¢ Product     (0)
+Product -&gt; â€¢ Product [*/] Factor  (2)
+Product -&gt; â€¢ Factor               (2)
+Factor  -&gt; â€¢ '(' Sum ')'          (2)
+Factor  -&gt; â€¢ Number               (2)
+Number  -&gt; â€¢ [0-9] Number         (2)
+Number  -&gt; â€¢ [0-9]                (2)
+
+=== 3 ===
+Factor  -&gt; '(' â€¢ Sum ')'          (2)
+Sum     -&gt; â€¢ Sum [+-] Product     (3)
+Sum     -&gt; â€¢ Product              (3)
+Product -&gt; â€¢ Product [*/] Factor  (3)
+Product -&gt; â€¢ Factor               (3)
+Factor  -&gt; â€¢ '(' Sum ')'          (3)
+Factor  -&gt; â€¢ Number               (3)
+Number  -&gt; â€¢ [0-9] Number         (3)
+Number  -&gt; â€¢ [0-9]                (3)
+
+=== 4 ===
+Number  -&gt; [0-9] â€¢ Number         (3)
+Number  -&gt; [0-9] â€¢                (3)
+Number  -&gt; â€¢ [0-9] Number         (4)
+Number  -&gt; â€¢ [0-9]                (4)
+Factor  -&gt; Number â€¢               (3)
+Product -&gt; Factor â€¢               (3)
+Sum     -&gt; Product â€¢              (3)
+Product -&gt; Product â€¢ [*/] Factor  (3)
+Factor  -&gt; '(' Sum â€¢ ')'          (2)
+Sum     -&gt; Sum â€¢ [+-] Product     (3)
+
+=== 5 ===
+Product -&gt; Product [*/] â€¢ Factor  (3)
+Factor  -&gt; â€¢ '(' Sum ')'          (5)
+Factor  -&gt; â€¢ Number               (5)
+Number  -&gt; â€¢ [0-9] Number         (5)
+Number  -&gt; â€¢ [0-9]                (5)
+
+=== 6 ===
+Number  -&gt; [0-9] â€¢ Number         (5)
+Number  -&gt; [0-9] â€¢                (5)
+Number  -&gt; â€¢ [0-9] Number         (6)
+Number  -&gt; â€¢ [0-9]                (6)
+Factor  -&gt; Number â€¢               (5)
+Product -&gt; Product [*/] Factor â€¢  (3)
+Sum     -&gt; Product â€¢              (3)
+Product -&gt; Product â€¢ [*/] Factor  (3)
+Factor  -&gt; '(' Sum â€¢ ')'          (2)
+Sum     -&gt; Sum â€¢ [+-] Product     (3)
+
+=== 7 ===
+Sum     -&gt; Sum [+-] â€¢ Product     (3)
+Product -&gt; â€¢ Product [*/] Factor  (7)
+Product -&gt; â€¢ Factor               (7)
+Factor  -&gt; â€¢ '(' Sum ')'          (7)
+Factor  -&gt; â€¢ Number               (7)
+Number  -&gt; â€¢ [0-9] Number         (7)
+Number  -&gt; â€¢ [0-9]                (7)
+
+=== 8 ===
+Number  -&gt; [0-9] â€¢ Number         (7)
+Number  -&gt; [0-9] â€¢                (7)
+Number  -&gt; â€¢ [0-9] Number         (8)
+Number  -&gt; â€¢ [0-9]                (8)
+Factor  -&gt; Number â€¢               (7)
+Product -&gt; Factor â€¢               (7)
+Sum     -&gt; Sum [+-] Product â€¢     (3)
+Product -&gt; Product â€¢ [*/] Factor  (7)
+Factor  -&gt; '(' Sum â€¢ ')'          (2)
+Sum     -&gt; Sum â€¢ [+-] Product     (3)
+
+=== 9 ===
+Factor  -&gt; '(' Sum ')' â€¢          (2)
+Product -&gt; Factor â€¢               (2)
+Sum     -&gt; Sum [+-] Product â€¢     (0)
+Product -&gt; Product â€¢ [*/] Factor  (2)
+Sum     -&gt; Sum â€¢ [+-] Product     (0)
+</code></pre>
+
+<p>Okay, let's start from the beginning.  We know the parse was successful:
+the recogniser said so, by showing us this item:</p>
+
+<pre><code>=== 9 ===
+Sum -&gt; Sum [+-] Product â€¢ (0)
+</code></pre>
+
+<p>There is a dot at the end, so this is a completed item.  It starts at
+<code>(0)</code> (the beginning), and stops at <code>(9)</code> (the very end).  There's only
+one way Earley's algorithm could possibly produce such an item: the
+whole input is a <code>Sum</code>.  We can visualise this item in a chart:</p>
+
+<pre><code>               â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤Sum -&gt; Sum [+-] Productâ”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚              â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜              â”‚
+â”‚                                                     â”‚
+0     1     2     3     4      5    6     7     8     9
+â”Œâ”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”
+â”‚  1  â”‚  +  â”‚  (  â”‚  2  â”‚  *  â”‚  3  â”‚  -  â”‚  4  â”‚  )  â”‚
+â””â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”˜
+</code></pre>
+
+<p>Indeed, this is a <code>Sum</code>, composed of 3 parts: the left operand, <code>"1"</code>,
+the operator, <code>"+"</code>, and the right operand, <code>"(2*3-4)"</code>.  Anyway,
+that's how we know the parse succeeded as a whole.</p>
+
+<p>So, Earley's algorithm works.  Duh.  But that's not what I'm after.  I
+need you to recall how this state was created.  More specifically,
+<em>what from</em>.  Let me pull back what I said in the recogniser section:</p>
+
+<blockquote>
+  <p>Imagine we have an item like this ('a', 'b', and 'c' are symbols, and
+'i' is an integer):</p>
+
+<pre><code>Rule -&gt; a b c â€¢  (i)
+</code></pre>
+
+<p>The fact that this item even <em>exist</em> means the following items also
+exist somewhere:</p>
+
+<pre><code>Foo -&gt;   a   b â€¢ c  (i)
+Foo -&gt;   a â€¢ b   c  (i)
+Foo -&gt; â€¢ a   b   c  (i)
+</code></pre>
+</blockquote>
+
+<p>In our current example this means we can find those items:</p>
+
+<pre><code>Sum -&gt;   Sum   [+-] â€¢ Product (0)
+Sum -&gt;   Sum â€¢ [+-]   Product (0)
+Sum -&gt; â€¢ Sum   [+-]   Product (0)
+</code></pre>
+
+<p>But that's not the end of it.  To advance an item one step, you need
+<em>two</em> things: an un-advanced version of the item (which we have here),
+and a completed <em>something</em>: either a completed state, or a successful
+scan.  This has several implications:</p>
+
+<ul>
+<li>There is another completed <code>Sum</code> somewhere.  It starts at <code>(0)</code>, and
+finishes atâ€¦ wellâ€¦ let's say <code>(x)</code>.</li>
+<li>There is a successful scan between <code>(x)</code> and <code>(x+1)</code>. Meaning, the
+input at <code>x</code> matches <code>[+-]</code>.</li>
+<li>There is a completed <code>Product</code> somewhere. It starts at <code>(x+1)</code>, and
+finishes atâ€¦ wait a minute this is the last one! it's got to finish
+wherever the overall <code>Sum</code> finishes!  That would be the end of the
+input, or <code>(9)</code>.</li>
+</ul>
+
+<h2>Performing the search</h2>
+
+<p>The problem now is to search for those states, and determine the value
+of <code>(x)</code>.  Given how Earley items are stored in the state sets, we
+need to start at the end: let's look for the <code>Product</code> there:</p>
+
+<pre><code>=== 9 ===
+Factor  -&gt; '(' Sum ')' â€¢          (2)
+Product -&gt; Factor â€¢               (2)
+Sum     -&gt; Sum [+-] Product â€¢     (0)
+Product -&gt; Product â€¢ [*/] Factor  (2)
+Sum     -&gt; Sum â€¢ [+-] Product     (0)
+</code></pre>
+
+<p>Okay, so there is only one that's completed:</p>
+
+<pre><code>=== 9 ===
+Product -&gt; Factor â€¢ (2)
+</code></pre>
+
+<p>And it started at <code>(2)</code>.  Okay, so <code>(x+1)</code> equals <code>(2)</code>!  Which means,
+there should be a successful scan between <code>(1)</code> and <code>(2)</code>.  Let's check
+the second character of the input:</p>
+
+<pre><code>1+(2*3-4)
+</code></pre>
+
+<p>That would be <code>"+"</code>, which definitely matches <code>[+-]</code>.  All is well so
+far.  Now, we're looking for a completed <code>Sum</code> in <code>(x)</code> â€”that is,
+<code>(1)</code>.  Let's lookâ€¦</p>
+
+<pre><code>=== 1 ===
+Number  -&gt; [0-9] â€¢ Number         (0)
+Number  -&gt; [0-9] â€¢                (0)
+Number  -&gt; â€¢ [0-9] Number         (1)
+Number  -&gt; â€¢ [0-9]                (1)
+Factor  -&gt; Number â€¢               (0)
+Product -&gt; Factor â€¢               (0)
+Sum     -&gt; Product â€¢              (0)
+Product -&gt; Product â€¢ [*/] Factor  (0)
+Sum     -&gt; Sum â€¢ [+-] Product     (0)
+</code></pre>
+
+<p>Okay, we can find only one:</p>
+
+<pre><code>=== 1 ===
+Sum -&gt; Product â€¢ (0)
+</code></pre>
+
+<p>Now to sum it up, the whole parse is composed of 3 parts:</p>
+
+<pre><code>=== 1 === Sum -&gt; Product â€¢ (0)
+=== 2 === [+-]
+=== 9 === Product -&gt; Factor â€¢ (2)
+</code></pre>
+
+<p>Again, we can visualise this as a chart.  Here, completed items become
+<em>edges</em> of a <em>graph</em>.  The nodes of the graph are the numbers I put
+between each input token (0-9).  In some way, those nodes represent
+the state sets.</p>
+
+<pre><code>                      â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤Sum -&gt; Sum [+-] Productâ”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚                     â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜                   â”‚
+â”‚â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â” â”Œâ”€â”€â”€â”€â”           â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”            â”‚
+â”Œâ”¤Sum -&gt; Productâ”œâ”â”‚[+-]â”‚â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤Product -&gt; Factorâ”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜â”‚â””â”€â”€â”€â”€â”˜â”‚          â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜            â”‚
+â”‚                â”‚      â”‚                                         â”‚
+0                1      2     3     4      5    6     7     8     9
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”
+â”‚       1        â”‚  +   â”‚  (  â”‚  2  â”‚  *  â”‚  3  â”‚  -  â”‚  4  â”‚  )  â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”˜
+</code></pre>
+
+<p>Granted, this case was easy, because there was only one solution.  You
+can thank the grammar for not being ambiguous.  In any case, there
+<em>had</em> to be a solution: if there wasn't one, the parse would have
+failed in the first place.  The <code>Sum</code> that spans the whole input
+wouldn't be there.</p>
+
+<h2>Nested searches!</h2>
+
+<p>So, we know exactly where the big <code>Sum</code> comes from.  We know that the
+scan succeeded, and why.  But what about the little <code>Sum</code> and
+<code>Product</code>?  Well, we just have to perform the same work, going down
+one level.  And then another.  And another.  Here is the final result,
+minus 2 gaps for space.  Filling them should be easy.</p>
+
+<pre><code>                           â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤Sum -&gt; Sum [+-] Productâ”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚                          â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜                         â”‚
+â”‚â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â” â”Œâ”€â”€â”€â”€â”              â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”                â”‚
+â”Œâ”¤Sum     -&gt; Productâ”œâ”â”‚[+-]â”‚â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤Product -&gt; Factorâ”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜â”‚â””â”€â”€â”€â”€â”˜â”‚             â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜                â”‚
+â”‚â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”â”‚      â”‚          â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”              â”‚
+â”Œâ”¤Product -&gt; Factor â”œâ”      â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤Factor  -&gt; '(' Sum ')'â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜â”‚      â”‚          â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜              â”‚
+â”‚â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”â”‚      â”‚â”Œâ”€â”€â”€â”     â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”        â”Œâ”€â”€â”€â”â”‚
+â”Œâ”¤Factor  -&gt; Number â”œâ”      â”‚â”‚'('â”‚â”Œâ”€â”€â”€â”€â”¤Sum -&gt; Sum [+-] Productâ”œâ”€â”€â”€â”€â”€â”€â”€â”â”‚')'â”‚â”‚
+â”‚â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜â”‚      â”‚â””â”€â”€â”€â”˜â”‚    â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜       â”‚â””â”€â”€â”€â”˜â”‚
+â”‚â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”â”‚      â”‚     â”‚â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”  â”Œâ”€â”€â”€â”€â” â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”â”‚     â”‚
+â”Œâ”¤Number  -&gt; [0-9]  â”œâ”      â”‚     â”Œâ”¤Sum -&gt; Productâ”œâ”€â”â”‚[+-]â”‚â”Œâ”¤Product  â”œâ”     â”‚
+â”‚â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜â”‚      â”‚     â”‚â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜ â”‚â””â”€â”€â”€â”€â”˜â”‚â”‚-&gt; Factorâ”‚â”‚     â”‚
+â”‚      â”Œâ”€â”€â”€â”€â”€â”       â”‚      â”‚     â”‚                 â”‚      â”‚â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜â”‚     â”‚
+â”‚      â”‚[0-9]â”‚       â”‚      â”‚     â”‚      etc.       â”‚      â”‚   etc.    â”‚     â”‚
+0      â””â”€â”€â”€â”€â”€â”˜       1      2     3     4     5     6      7           8     9
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”
+â”‚         1          â”‚  +   â”‚  (  â”‚  2  â”‚  *  â”‚  3  â”‚  -   â”‚     4     â”‚  )  â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”˜
+</code></pre>
+
+<p>It helps to do those things manually at least once, to get a feel of
+the algorithm, and the data we need.</p>
+
+<p>Speaking of which (you probably have noticed this by now), we don't
+need all of the Earley items.  Only the completed ones.  This makes
+sense since we're after successful parses, not aborted attempts.  Here
+is a list of all completed items: Note the correspondence with the
+chart above: it's basically the same data, visualised differently.
+Only the scans aren't represented.</p>
+
+<pre><code>=== 0 ===
+
+=== 1 ===
+Number  -&gt; [0-9]                (0)
+Factor  -&gt; Number               (0)
+Product -&gt; Factor               (0)
+Sum     -&gt; Product              (0)
+
+=== 2 ===
+
+=== 3 ===
+
+=== 4 ===
+Number  -&gt; [0-9]                (3)
+Factor  -&gt; Number               (3)
+Product -&gt; Factor               (3)
+Sum     -&gt; Product              (3)
+
+=== 5 ===
+
+=== 6 ===
+Number  -&gt; [0-9]                (5)
+Factor  -&gt; Number               (5)
+Product -&gt; Product [*/] Factor  (3)
+Sum     -&gt; Product              (3)
+
+=== 7 ===
+
+=== 8 ===
+Number  -&gt; [0-9]                (7)
+Factor  -&gt; Number               (7)
+Product -&gt; Factor               (7)
+Sum     -&gt; Sum [+-] Product     (3)
+
+=== 9 ===
+Factor  -&gt; '(' Sum ')'          (2)
+Product -&gt; Factor               (2)
+Sum     -&gt; Sum [+-] Product     (0)
+</code></pre>
+
+<p>Much more manageable.</p>
+
+<h2>Searching from the wrong end</h2>
+
+<p>We still have a problem however.  Remember how we found out how the
+big <code>Sum</code> was parsed?  We searched from the <em>end</em>, then worked up to
+the beginning.  In this case it didn't matter, because our grammar has
+no ambiguity.  If we found one however, we would have to resolve it
+from the <em>end</em>, which is not very intuitive for the user: can you
+imagine a longest-match rule that maximises the length of the <em>last</em>
+rule first?  This would look like a <em>shortest</em> match in most cases.</p>
+
+<p>That won't do.  We need to start at the beginning.  The trick is to see
+the completed items as edges:</p>
+
+<ul>
+<li>A beginning.</li>
+<li>An end.</li>
+<li>A grammar rule.</li>
+</ul>
+
+<p>A completed item only stores its beginning and its rule.  Its end is
+implicit: it's the Earley set it is stored on.  We can reverse that.
+Instead of having this:</p>
+
+<pre><code>=== 9 ===
+Product -&gt; Factor (2)
+</code></pre>
+
+<p>We could have the <em>beginning</em> be implicit, and store the end.  Like
+that:</p>
+
+<pre><code>=== 2 ===
+Product -&gt; Factor (9)
+</code></pre>
+
+<p>It is basically the same thing, but now we can perform searches from
+the beginning.  Here is the whole chart, dully reversed:</p>
+
+<pre><code>=== 0 ===
+Sum     -&gt; Sum [+-] Product    (9)
+Sum     -&gt; Product             (1)
+Product -&gt; Factor              (1)
+Factor  -&gt; Number              (1)
+Number  -&gt; [0-9]               (1)
+
+=== 1 ===
+
+=== 2 ===
+Product -&gt; Factor              (9)
+Factor  -&gt; '(' Sum ')'         (9)
+
+=== 3 ===
+Sum     -&gt; Sum [+-] Product    (8)
+Sum     -&gt; Product             (6)
+Sum     -&gt; Product             (4)
+Product -&gt; Product [*/] Factor (6)
+Product -&gt; Factor              (4)
+Factor  -&gt; Number              (4)
+Number  -&gt; [0-9]               (4)
+
+=== 4 ===
+
+=== 5 ===
+Factor -&gt; Number               (6)
+Number -&gt; [0-9]                (6)
+
+=== 6 ===
+
+=== 7 ===
+Product -&gt; Factor              (8)
+Factor  -&gt; Number              (8)
+Number  -&gt; [0-9]               (8)
+
+=== 8 ===
+
+=== 9 ===
+</code></pre>
+
+<p>Now we can start again.  The top rule, the one that says we parsed
+everything, is now at the <em>beginning</em>:</p>
+
+<pre><code>=== 0 ===
+Sum -&gt; Sum [+-] Product (9)
+</code></pre>
+
+<p>It is a <code>Sum</code> that starts at <code>(0)</code> and finishes at <code>(9)</code>.  Again, this
+confirms the input has been completely and correctly parsed.  Now we
+can search how this <code>Sum</code> has been parsed.  From this input, we know
+the same things we knew before:</p>
+
+<ul>
+<li>There is a completed <code>Sum</code> between <code>(0)</code> and <code>(x)</code>.</li>
+<li>There is a "+" or a "-" character between <code>(x)</code> and <code>(x+1)</code>.</li>
+<li>There is a <code>Product</code> between <code>(x+1)</code> and <code>(9)</code></li>
+</ul>
+
+<p>Now however, because the edges are stored at their beginning location,
+we can search this chart at <code>(0)</code>:</p>
+
+<pre><code>=== 0 ===
+Sum     -&gt; Sum [+-] Product    (9)
+Sum     -&gt; Product             (1)
+Product -&gt; Factor              (1)
+Factor  -&gt; Number              (1)
+Number  -&gt; [0-9]               (1)
+</code></pre>
+
+<p>Ah, there are <em>Two</em> sums that match.  Let's try the first:</p>
+
+<pre><code>=== 0 ===
+Sum     -&gt; Sum [+-] Product    (9)
+</code></pre>
+
+<p>If this is the one, <code>(x)</code> should now be <code>(9)</code>.  Let's see if there is
+a character between <code>(9)</code> and <code>(10)</code>â€¦ argh, this is the end of the
+input!  It doesn't match.  Okay, let's keep calm and backtrackâ€¦</p>
+
+<pre><code>=== 0 ===
+Sum     -&gt; Sum [+-] Product    (9) !! Failed !!
+Sum     -&gt; Product             (1)
+Product -&gt; Factor              (1)
+Factor  -&gt; Number              (1)
+Number  -&gt; [0-9]               (1)
+</code></pre>
+
+<p>â€¦so we can try the second <code>Sum</code>:</p>
+
+<pre><code>=== 0 ===
+Sum     -&gt; Product             (1)
+</code></pre>
+
+<p>If this is the one, <code>(x)</code> is now <code>(1)</code>.  Let's test the input between
+<code>(1)</code> and <code>(2)</code>â€¦ it is a "+" character, which matches <code>[+-]</code>. We're
+still good. Let's try the <code>Product</code> now.  It should start at <code>(2)</code>:</p>
+
+<pre><code>=== 2 ===
+Product -&gt; Factor              (9)
+Factor  -&gt; '(' Sum ')'         (9)
+</code></pre>
+
+<p>Good, there is one, and it finishes at <code>(9)</code>.  This was the last of
+them, and we're now at <code>(9)</code>.  We win!</p>
+
+<h2>A real depth-first search</h2>
+
+<p>We have performed a search.  You may now be able to implement it in
+code.  Still, a few clarifications should help you.  It may not be
+obvious, but what we just did was really a depth-first search through
+a graph.</p>
+
+<h3>Aside: depth first search.</h3>
+
+<p>This one's simple: you have a directed graph, with nodes and edges.
+You are at some node.</p>
+
+<ol>
+<li><p>If the current node is a <em>leaf</em>, you win!</p></li>
+<li><p>Otherwise, make a list of all edges starting from the current node.
+That will give you a list of <em>children</em> nodes.  Go to the first
+child, then back to step 1.  This will yield one of 2 results:</p>
+
+<ul>
+<li>You eventually found a leaf.  Congratulations, you win!</li>
+<li>The search stopped before you found a leaf.  Try the next child
+instead.</li>
+</ul>
+
+<p>If there are no more child to try, the search stops.</p></li>
+</ol>
+
+<p>More details can be found in the
+<a href="https://en.wikipedia.org/wiki/Depth-first_search">Wikipedia</a>.</p>
+
+<h3>Our search graph</h3>
+
+<p>We know how to search a graph, but we're not sure <em>what</em> graph
+exactly.  More specifically, what are the nodes and the branches of
+this graph?  Where are the leaves?  Where do we start?</p>
+
+<p>The <em>nodes</em> are the state sets.  In our example we have 10, from <code>(0)</code>
+to <code>(9)</code>.  One of them is the <em>root</em> (the search starts there), and
+one of them is the <em>leaf</em> (the search stops there).  When we decompose
+a rule such as this:</p>
+
+<pre><code>=== x ===
+A -&gt; a b c  (y)
+</code></pre>
+
+<p>the root is <code>(x)</code>, and the leaf is <code>(y)</code>.</p>
+
+<p>The <em>edges</em> are the items themselves.  They start from a node (indeed,
+they are <em>stored</em> in a node, and they point to another node (wherever
+they finish).  There's one subtlety however.  Some edges aren't
+represented in the state stets: the scans.  But we don't really need
+them: first, when we search for a scan, we know it starts at the
+current node, and stops at the next: scans always span exactly one
+token.  Second, we can test scans directly from the input.  Third, the
+rule we are decomposing tell us which test we must perform.</p>
+
+<p>Another important notion here is the <em>depth</em> of the current node.  It
+tells us which symbol we should look for in the rule we are
+decomposing.</p>
+
+<p>Finally, we should remember the whole <em>path</em> that lead us to the final
+node.  That is, the list of the edges that lead us from the root to
+the leaf.</p>
+
+<p>Now, I should just show you the code.  It's not Lua any more, sorry.
+I couldn't turn my vague ideas into code without static typing to
+guide me.  (Static typing offer a <em>much</em> tighter feedback loop than
+dynamic typing in many cases: failure happens sooner, and closer to
+the root cause.  Invaluable for exploratory programming.)</p>
+
+<p>Anyway:</p>
+
+<pre><code>let df_search (edges : int -&gt; 'node -&gt; 'edge DA.t)
+              (child : int -&gt; 'edge -&gt; 'node     )
+              (pred  : int -&gt; 'node -&gt; bool      )
+              (root  : 'node                     )
+    : ('node * 'edge) list option =
+  let rec aux depth root =
+    if pred depth root
+    then Some []
+    else opt_find_mem (child depth |- aux (depth + 1))
+                      (edges depth root)
+         &gt;&gt;= (fun (edge, path) -&gt; Some ((root, edge) :: path))
+  in aux 0 root
+</code></pre>
+
+<p>This is my generalised depth first search routine.  It takes 4
+arguments:</p>
+
+<ul>
+<li><code>edges</code>: a function that given a depth and a node, will return a
+list of edges.</li>
+<li><code>child</code>: a function that given a depth and an edge, will return a
+node.</li>
+<li><code>pred</code>: a function that given a depth and a node, will tell you if
+the node is a leaf.</li>
+<li><code>root</code>: A node.  This will be the starting point of the search.</li>
+</ul>
+
+<p>This search then returns a list, where each element is a node and an
+edge that starts from this node.  I have done it this way because the
+edges I use later don't store their start node â€”only the grammar rule
+and their end point.</p>
+
+<p>Ah, and of course, the search could fail, in which case it returns
+nothing (hence the <code>option</code> in the return type).  I also use a couple
+important helper functions:</p>
+
+<pre><code>let (&gt;&gt;=)      x f = match x with None -&gt; None | Some r -&gt; f r
+let opt_find     f = DA.foldl (function None -&gt; f | e -&gt; const e) None
+let opt_find_mem f = opt_find (fun a -&gt; f a &gt;&gt;= (fun out -&gt; Some (a, out)))
+</code></pre>
+
+<p>The first operator let me use the <code>option</code> type as a monad.  Less
+cumbersome than pattern matching.  <code>opt_find</code> is a clever function
+that applies a function to each element of a list (here implemented as
+a dynamic array), and returns the first non-null result.
+<code>opt_find_mem</code> is the same, except it also returns the element of the
+list that produced the result we wanted.</p>
+
+<p>Now the actual search function.  It decomposes one edge into a list of
+sub-edges, using the depth first search above:</p>
+
+<pre><code>let top_list (grammar        : 'a grammar     )
+             (input          : 'a input       )
+             (chart          : edge DA.t DA.t )
+             (start          : int            )
+             ({finish; rule} : edge           )
+    : (int * edge) list =
+  let symbols           = rule_body grammar rule           in
+  let bottom            = DA.length symbols                in
+  let pred  depth start = depth = bottom &amp;&amp; start = finish in
+  let child depth edge  = edge.finish                      in
+  let edges depth start =
+    if depth &gt;= DA.length symbols
+    then DA.make_empty ()  (* Going past the maximum depth fails the search *)
+    else match symbols &gt;: depth with
+         | Terminal (t, _) -&gt; if t (input start)
+                              then DA.make 1 {finish = start + 1; rule = -1}
+                              else DA.make_empty () (* Non-matching token fail
+                                                       the search *)
+         | Non_term name   -&gt; (chart &gt;: start) // (fun {finish; rule} -&gt;
+                                                   rule_name grammar rule = name)
+  in
+  match df_search edges child pred start with
+  | None      -&gt; failwith "there's always a solution"
+  | Some path -&gt; path
+</code></pre>
+
+<p>This function takes 5 arguments.  The first three form a general context:</p>
+
+<ul>
+<li>The grammar over which we operate.  I need it to retrieve the rules
+referenced by the edges.  (My edges only store an index to their
+rule.)</li>
+<li>The input.  I need it to check the terminal symbols.</li>
+<li>The chart.  All the completed items produced by the recogniser.
+Dully reversed, so the search can be done from the beginning.  This
+is where I pick my edges from.</li>
+</ul>
+
+<p>The last two form what I call an "edge":</p>
+
+<ul>
+<li><code>start</code>: the starting point of the edge.  Not technically part of my
+edges, but important nonetheless (I need them for further
+decomposition).</li>
+<li><code>finish</code>: where the edge ends.</li>
+<li><code>rule</code>: an integer that denotes a grammar rule.  I need the body
+this rule to perform the decomposition.</li>
+</ul>
+
+<p>You will note the presence of 2 helper operators: the first (<code>&gt;:</code>) is
+array indexing.  The second (<code>//</code>) is a filter.</p>
+
+<p>Now you can see why the depth is so important: it lets me know which
+symbol I am processing, and determines the valid edges that start from
+the current node.  There are two cases when producing those edges:</p>
+
+<ul>
+<li><em>Terminal symbols.</em>  Those aren't represented as edges in the chart,
+so I have to make one up.  This edge references no rule (hence the
+-1), and it finishes exactly one token later.</li>
+<li><em>Non-terminal symbols.</em> Those I just search for by name.  If the
+current symbol denotes a <code>Product</code>, that's what I will search for.</li>
+</ul>
+
+<p>One last thing: this function <em>cannot fail</em>.  It will always produce
+a meaningful result: every edge that is on the chart can be
+decomposed.  Terminal symbols are different, but we don't decompose
+them anyway.  So, if this ever fail, you have a bug somewhere.</p>
+
+<h2>Building the whole parse tree</h2>
+
+<p>Now we can decompose <em>one</em> edge into its sub edges.  The only thing
+left to do is apply this recursively to have the whole tree.  This
+part is relatively obvious:</p>
+
+<pre><code>type 'a parse_tree = Token of 'a
+                   | Node  of string * 'a parse_tree list
+
+let parse_tree (grammar : 'a grammar    )
+               (input   : 'a input      )
+               (chart   : edge DA.t DA.t)
+    : 'a option parse_tree =
+  let start  = 0                                        in
+  let finish = DA.length chart - 1                      in
+  let name   = grammar.start_symbol                     in
+  let rule_name {finish; rule} = rule_name grammar rule in
+  let rec aux (start, edge)    =
+    if edge.rule = -1
+    then Token (input start)
+    else Node (rule_name edge,
+               List.map aux (top_list grammar input chart start edge))
+  in
+  match DA.find (fun edge -&gt; edge.finish = finish &amp;&amp; rule_name edge = name)
+                (chart &gt;: start)
+        &gt;&gt;= fun edge -&gt; Some (aux (start, edge))
+  with
+  | None      -&gt; failwith "Are you sure this parse succeeded?"
+  | Some node -&gt; node
+    type 'a parse_tree = Token of 'a
+                       | Node  of string * 'a parse_tree list
+</code></pre>
+
+<p>So, a parse tree is either a token (directly taken from the input) or
+a node (the name of the grammar rule involved, and the list of the sub-tree
+that compose it).  Well, a parse tree.</p>
+
+<p>The function that constructs the parse tree take the same context than
+the function that decomposes one node: a grammar, the input, and a
+chart.  We then use that context (start symbol of the grammar, size of
+the chartâ€¦) to determine where to start the search.  Again, if called
+correctly on a parse that succeeded, this function cannot fail.</p>
+
+<p>Anyway, this will get us our parse tree:</p>
+
+<pre><code>           â”Œâ”€â”€â”€â”€â”€â”
+           â”‚ Sum â”‚
+           â””â”¬â”€â”¬â”€â”¬â”˜
+   â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”˜ â”‚ â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”Œâ”€â”€â”´â”€â”€â”     â”Œâ”€â”´â”€â”    â”Œâ”€â”€â”€â”€â”´â”€â”€â”€â”€â”
+â”‚ Sum â”‚     â”‚ + â”‚    â”‚ Product â”‚
+â””â”€â”€â”¬â”€â”€â”˜     â””â”€â”€â”€â”˜    â””â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”˜
+â”Œâ”€â”€â”´â”€â”€â”€â”€â”€â”€â”           â”Œâ”€â”€â”€â”´â”€â”€â”€â”€â”
+â”‚ Product â”‚           â”‚ Factor â”‚
+â””â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”˜           â””â”€â”¬â”€â”¬â”€â”¬â”€â”€â”˜
+â”Œâ”€â”€â”´â”€â”€â”€â”€â”€â”         â”Œâ”€â”€â”€â”€â”˜ â”‚ â””â”€â”€â”€â”€â”
+â”‚ Factor â”‚       â”Œâ”€â”´â”€â” â”Œâ”€â”€â”´â”€â”€â” â”Œâ”€â”´â”€â”
+â””â”€â”€â”¬â”€â”€â”€â”€â”€â”˜       â”‚ ( â”‚ â”‚ Sum â”‚ â”‚ ) â”‚
+â”Œâ”€â”€â”´â”€â”€â”€â”€â”€â”       â””â”€â”€â”€â”˜ â””â”¬â”€â”¬â”€â”¬â”˜ â””â”€â”€â”€â”˜
+â”‚ Number â”‚       â”Œâ”€â”€â”€â”€â”€â”€â”˜ â”‚ â””â”€â”€â”€â”€â”€â”€â”€â”€â”
+â””â”€â”€â”¬â”€â”€â”€â”€â”€â”˜    â”Œâ”€â”€â”´â”€â”€â”   â”Œâ”€â”´â”€â”   â”Œâ”€â”€â”€â”€â”´â”€â”€â”€â”€â”
+ â”Œâ”€â”´â”€â”        â”‚ Sum â”‚   â”‚ - â”‚   â”‚ Product â”‚
+ â”‚ 1 â”‚        â””â”€â”€â”¬â”€â”€â”˜   â””â”€â”€â”€â”˜   â””â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”˜
+ â””â”€â”€â”€â”˜      â”Œâ”€â”€â”€â”€â”´â”€â”€â”€â”€â”          â”Œâ”€â”€â”€â”´â”€â”€â”€â”€â”
+            â”‚ Product â”‚          â”‚ Factor â”‚
+            â””â”€â”€â”¬â”€â”¬â”€â”¬â”€â”€â”˜          â””â”€â”€â”€â”¬â”€â”€â”€â”€â”˜
+        â”Œâ”€â”€â”€â”€â”€â”€â”˜ â”‚ â””â”€â”€â”€â”€â”€â”       â”Œâ”€â”€â”€â”´â”€â”€â”€â”€â”
+   â”Œâ”€â”€â”€â”€â”´â”€â”€â”€â”€â” â”Œâ”€â”´â”€â” â”Œâ”€â”€â”€â”´â”€â”€â”€â”€â”  â”‚ Number â”‚
+   â”‚ Product â”‚ â”‚ * â”‚ â”‚ Factor â”‚  â””â”€â”€â”€â”¬â”€â”€â”€â”€â”˜
+   â””â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”˜ â””â”€â”€â”€â”˜ â””â”€â”€â”€â”¬â”€â”€â”€â”€â”˜    â”Œâ”€â”´â”€â”
+   â”Œâ”€â”€â”€â”€â”´â”€â”€â”€â”        â”Œâ”€â”€â”€â”´â”€â”€â”€â”€â”    â”‚ 4 â”‚
+   â”‚ Factor â”‚        â”‚ Number â”‚    â””â”€â”€â”€â”˜
+   â””â”€â”€â”€â”€â”¬â”€â”€â”€â”˜        â””â”€â”€â”€â”¬â”€â”€â”€â”€â”˜
+   â”Œâ”€â”€â”€â”€â”´â”€â”€â”€â”          â”Œâ”€â”´â”€â”
+   â”‚ Number â”‚          â”‚ 3 â”‚
+   â””â”€â”€â”€â”€â”¬â”€â”€â”€â”˜          â””â”€â”€â”€â”˜
+      â”Œâ”€â”´â”€â”
+      â”‚ 2 â”‚
+      â””â”€â”€â”€â”˜
+</code></pre>
+
+<p>Hmmâ€¦ Not as neat and clean as we might want it to be.  It's workable
+for now, but there are ways to make this simpler.  We'll get to that
+in a later post.</p>
+
+<h2>Resolving ambiguities</h2>
+
+<p>I mentioned ambiguities before, yet avoided to confront the subject.
+The only thing we can do right now is find a parse tree. <em>Any</em> parse
+tree.  The problem is, if there are several possibilities,  just
+taking one of them isn't going to solve our problem: we want the
+output to be <em>predictable</em>.</p>
+
+<p>You might think the problem would go away if you simply ban ambiguous
+grammars.  Now you have <em>two</em> problems:</p>
+
+<ul>
+<li>The ambiguity of context free grammars is undecidable.  You will
+either let some ambiguous grammars slip, or reject some unambiguous
+ones.  Reliability or generality, pick one.</li>
+<li>Second, many ambiguous grammars are actually useful.  Some context
+free languages are <em>inherently</em> ambiguous, and can only be parsed
+with ambiguous grammars.  Others are simply easier to process with
+ambiguous grammars.</li>
+</ul>
+
+<p>So we should accept ambiguous grammar.  Let's see an example: the
+famous "dangling else":</p>
+
+<pre><code>if
+if {}
+else {}
+</code></pre>
+
+<p>There are two ways to parse this.  Either the <code>else</code> branch belongs to
+the outer <code>if</code>:</p>
+
+<pre><code>if
+  if {}
+else {}
+</code></pre>
+
+<p>Or, it belong to the inner <code>if</code>:</p>
+
+<pre><code>if
+  if {}
+  else {}
+</code></pre>
+
+<p>Let's try and write a grammar for this little language:</p>
+
+<pre><code>Block -&gt; "{}"
+Block -&gt; If
+If    -&gt; "if" Block
+If    -&gt; "if" Block "else" Block
+</code></pre>
+
+<p>Here are the two possible syntax trees:</p>
+
+<pre><code>         â”Œâ”€â”€â”€â”€â”€â”€â”€â”
+         â”‚ Block â”‚
+         â””â”€â”€â”€â”¬â”€â”€â”€â”˜
+           â”Œâ”€â”´â”€â”€â”
+           â”‚ If â”‚
+           â””â”¬â”¬â”¬â”¬â”˜
+   â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”˜â”‚â”‚â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+   â”‚         â”‚â””â”€â”€â”€â”€â”€â”€â”€â”           â”‚
+â”Œâ”€â”€â”´â”€â”€â”€â” â”Œâ”€â”€â”€â”´â”€â”€â”€â” â”Œâ”€â”€â”´â”€â”€â”€â”€â”€â” â”Œâ”€â”€â”€â”´â”€â”€â”€â”
+â”‚ "if" â”‚ â”‚ Block â”‚ â”‚ "else" â”‚ â”‚ Block â”‚
+â””â”€â”€â”€â”€â”€â”€â”˜ â””â”€â”€â”€â”¬â”€â”€â”€â”˜ â””â”€â”€â”€â”€â”€â”€â”€â”€â”˜ â””â”€â”€â”€â”¬â”€â”€â”€â”˜
+           â”Œâ”€â”´â”€â”€â”             â”Œâ”€â”€â”€â”´â”€â”€â”
+           â”‚ If â”‚             â”‚ "{}" â”‚
+           â””â”€â”¬â”¬â”€â”˜             â””â”€â”€â”€â”€â”€â”€â”˜
+        â”Œâ”€â”€â”€â”€â”˜â””â”€â”€â”€â”€â”
+     â”Œâ”€â”€â”´â”€â”€â”€â”  â”Œâ”€â”€â”€â”´â”€â”€â”€â”
+     â”‚ "if" â”‚  â”‚ Block â”‚
+     â””â”€â”€â”€â”€â”€â”€â”˜  â””â”€â”€â”€â”¬â”€â”€â”€â”˜
+               â”Œâ”€â”€â”€â”´â”€â”€â”
+               â”‚ "{}" â”‚
+               â””â”€â”€â”€â”€â”€â”€â”˜
+
+â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+    â”Œâ”€â”€â”€â”€â”€â”€â”€â”
+    â”‚ Block â”‚
+    â””â”€â”€â”€â”¬â”€â”€â”€â”˜
+      â”Œâ”€â”´â”€â”€â”
+      â”‚ If â”‚
+      â””â”€â”¬â”¬â”€â”˜
+   â”Œâ”€â”€â”€â”€â”˜â””â”€â”€â”€â”€â”
+â”Œâ”€â”€â”´â”€â”€â”€â”  â”Œâ”€â”€â”€â”´â”€â”€â”€â”
+â”‚ "if" â”‚  â”‚ Block â”‚
+â””â”€â”€â”€â”€â”€â”€â”˜  â””â”€â”€â”€â”¬â”€â”€â”€â”˜
+            â”Œâ”€â”´â”€â”€â”
+            â”‚ If â”‚
+            â””â”¬â”¬â”¬â”¬â”˜
+    â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”˜â”‚â”‚â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+    â”‚         â”‚â””â”€â”€â”€â”€â”€â”€â”€â”           â”‚
+ â”Œâ”€â”€â”´â”€â”€â”€â” â”Œâ”€â”€â”€â”´â”€â”€â”€â” â”Œâ”€â”€â”´â”€â”€â”€â”€â”€â” â”Œâ”€â”€â”€â”´â”€â”€â”€â”
+ â”‚ "if" â”‚ â”‚ Block â”‚ â”‚ "else" â”‚ â”‚ Block â”‚
+ â””â”€â”€â”€â”€â”€â”€â”˜ â””â”€â”€â”€â”¬â”€â”€â”€â”˜ â””â”€â”€â”€â”€â”€â”€â”€â”€â”˜ â””â”€â”€â”€â”¬â”€â”€â”€â”˜
+          â”Œâ”€â”€â”€â”´â”€â”€â”             â”Œâ”€â”€â”€â”´â”€â”€â”
+          â”‚ "{}" â”‚             â”‚ "{}" â”‚
+          â””â”€â”€â”€â”€â”€â”€â”˜             â””â”€â”€â”€â”€â”€â”€â”˜
+</code></pre>
+
+<h3>What is an ambiguity?</h3>
+
+<p>Recall that Earley items are unique: the algorithm make sure there is
+no duplicate.  Here, we're only interested in completed items (or
+edges).  So, two different edges will have at least one difference:</p>
+
+<ul>
+<li>In their start point.</li>
+<li>In their end point.</li>
+<li>Or in their grammar rule.</li>
+</ul>
+
+<p>Obviously.  Now recall our depth first search: for a given start
+point, we gather every edge whose rule name match the current symbol.
+Yup, there might be several.  <em>That</em>, is a possible ambiguity.</p>
+
+<p>I must insist on <em>possible</em>.  As you have seen in our arithmetic
+expression example above, some branches may abort, leaving only one
+valid solution.  Actual ambiguity only arises when the search could
+have yielded different results, depending on which edge was picked
+first.</p>
+
+<h3>Resolution</h3>
+
+<p>So, when we perform our search, we're only looking at one start point:
+the current node.  The edges we find there can only be different in 2
+ways: by their end point, or by their grammar rule.  For instance, in
+our dangling else example, when you're searching for an <code>If</code> rule from
+0 to 5 (the whole input), you will find 2 edges:</p>
+
+<pre><code>=== 0 ===
+If -&gt; "if" Block               (5)
+If -&gt; "if" Block "else" Block  (5)
+</code></pre>
+
+<p>Those edges end at the same point, but differ by their rule.  Written
+as it is, our search algorithm will just pick the first one.  Which is
+precisely what we will exploit here: when we construct the chart, we
+can do more than just flipping items.  We can <em>sort</em> them.</p>
+
+<p>My current choice is a blend of prioritised choice and longest match.
+The order of the rule in the grammar is significant.  If there are
+more than one possibility, the rule that appear first will have
+precedence.  When that does not suffice,  I just put the longest edge
+first.  This way:</p>
+
+<pre><code>-- Grammar --
+Foo -&gt; a b
+Foo -&gt; c d
+
+-- Chart --
+=== x ===
+Foo -&gt; a b  (y)
+Foo -&gt; c d  (y)
+Foo -&gt; c d  (z)  -- z &lt; y
+</code></pre>
+
+<p>I believe this gives acceptable control.  Granted, there are more fine
+grained ways of doing this, but the algorithms involved would be
+significantly more complex.  I think it is simpler to just decide at
+the top level, and let the consequences of those decisions flow
+downward.</p>
+
+<p>That said, nothing stops you from trying other disambiguation
+mechanisms: by nature, they're limited to the search of edges and the
+construction of the parse tree.  Whatever complexity lurks in there
+won't affect the rest of the program.</p>
+
+<p>Back to our example, if we pick this rule firstâ€¦</p>
+
+<pre><code>If -&gt; "if" Block (5)
+</code></pre>
+
+<p>â€¦then the outer <code>If</code> will have no <code>else</code> clause.  The <code>else</code> close
+will therefore belong to the inner <code>If</code>, just like it would in most
+programming languages.  If you pick the other rule first, you get the
+other possibility.</p>
+
+<p>Just by flipping the order of the rules in the grammar, you can decide
+where the <code>else</code> clause will go.</p>
+
+<h2>One last trap</h2>
+
+<p>I forgot to tell you: some grammars will blow up in your face:</p>
+
+<pre><code>A -&gt; A
+A -&gt;
+</code></pre>
+
+<p>The problem is, this grammar generates an infinite amount of parse
+trees:</p>
+
+<pre><code>â”Œâ”€â”€â”€â”     â”Œâ”€â”€â”€â”     â”Œâ”€â”€â”€â”
+â”‚ A â”‚     â”‚ A â”‚     â”‚ A â”‚     ...
+â””â”€â”€â”€â”˜     â””â”€â”¬â”€â”˜     â””â”€â”¬â”€â”˜
+          â”Œâ”€â”´â”€â”     â”Œâ”€â”´â”€â”
+          â”‚ A â”‚     â”‚ A â”‚
+          â””â”€â”€â”€â”˜     â””â”€â”¬â”€â”˜
+                    â”Œâ”€â”´â”€â”
+                    â”‚ A â”‚
+                    â””â”€â”€â”€â”˜
+</code></pre>
+
+<p>So, when I'm constructing my parse tree, I could be unlucky enough to
+fall into one of those bottomless pits until I overflow the stack.
+We need to do something about it.  We could try and avoid the infinite
+paths, but I don't like it.  It would complicate the construction of
+the parse tree, and frankly, this is complex enough already.</p>
+
+<p>My solution is more brutal: such bottomless grammars are bogus, and
+should be rejected.  Fortunately, unlike unlike ambiguous grammars,
+they can be detected with a little bit of static analysis.</p>
+
+<ul>
+<li><p>First we compile the nullable rules: they are the rules which
+contain only nullable terminal symbols.  (And we have learned to
+detect those <a href="empty-rules">earlier</a>).</p></li>
+<li><p>For each nullable symbol, we compile the symbols which appear in the
+right hand side of the corresponding nullable rules.  Imagine the
+following grammar:</p>
+
+<pre><code>A -&gt; A C
+A -&gt; B
+A -&gt;
+B -&gt; A
+C -&gt; 'x'
+</code></pre>
+
+<p>This grammar has 2 nullable symbols, A and B. The nullable rules are
+those:</p>
+
+<pre><code>A -&gt; B
+A -&gt;
+B -&gt; A
+</code></pre>
+
+<p>In this simple case, the only child of "A" is "B", and vice versa.</p></li>
+<li><p>Finally, we look for duplicates in the transitive closure of
+children.  If a path includes a duplicate, then we have found a
+loop, and must reject the grammar.  For instance, with he above
+grammar, When I examine the symbol "A", I find only one child, "B".
+So far so good.  Then I examine "B" and find the grandchild "A".
+We have a duplicate, so this grammar is bottomless.</p></li>
+</ul>
+
+<p>That's basically it.  For reference, here is my code:</p>
+
+<pre><code>let infinite_loop : 'a grammar -&gt; bool = fun grammar -&gt;
+  let null_set        = nullable_symbols grammar                            in
+  let rules symbol    = grammar.rules // (fun {lhs} -&gt; lhs = symbol)
+                                      // is_nullable null_set
+                                      /@ (fun {rhs} -&gt; rhs)                 in
+  let add_rule        = DA.foldl (fun set -&gt; function
+                                  | Terminal _   -&gt; failwith "impossible"
+                                  | Non_term sym -&gt; String_set.add sym set) in
+  let children symbol = DA.foldl add_rule
+                                 String_set.empty
+                                 (rules symbol)                             in
+  let rec aux path symbol =
+    if List.mem symbol path
+    then true
+    else String_set.exists (aux (symbol::path))
+                           (children symbol)
+  in String_set.exists (aux []) null_set
+</code></pre>
+
+<p>It is worth breaking up a bit.  First, we get the null symbols.  I
+reuse the previous nullable_symbols detector directly.</p>
+
+<pre><code>let null_set = nullable_symbols grammar
+</code></pre>
+
+<p>Then I need to detect the nullable rules that correspond to a given
+symbol.  I only take the grammars rules I want: their name must be the
+symbol I seek (obviously), and they must be nullable.  Finally, I only
+take the right hand side of each rule.  (The <code>//</code> operator is a
+filter, and the <code>/@</code> operator is a map.)</p>
+
+<pre><code>let rules symbol = grammar.rules // (fun {lhs} -&gt; lhs = symbol)
+                                 // is_nullable null_set
+                                 /@ (fun {rhs} -&gt; rhs)
+</code></pre>
+
+<p>Once I have my rules for a given symbol, I need to collect the
+children symbols.  Remember that nullable rules don't have terminal
+symbols.</p>
+
+<pre><code>let add_rule = DA.foldl (fun set -&gt; function
+                         | Terminal _   -&gt; failwith "impossible"
+                         | Non_term sym -&gt; String_set.add sym set)
+
+let children symbol = DA.foldl add_rule
+                               String_set.empty
+                               (rules symbol)
+</code></pre>
+
+<p>Finally, I perform the search for duplicates.  During the search, I
+keep track of the symbols of the current path.  If the current symbol
+is in this path, we have hit a loop, and return <code>true</code> to say so.
+(Production code should return the path itself, for a more friendly
+error message.)  Otherwise we search deeper, if possible.</p>
+
+<pre><code>let rec aux path symbol =
+  if List.mem symbol path
+  then true
+  else String_set.exists (aux (symbol::path))
+                         (children symbol)
+</code></pre>
+
+<p>Of course,  We need to perform this search for every nullable symbol:</p>
+
+<pre><code>String_set.exists (aux []) null_set
+</code></pre>
+
+<h2>Conclusion</h2>
+
+<p>Now you should be able to build a fully fledged Earley parser.  As
+always, my <a href="parser.ml">code</a> is available for study.  Again, sorry
+about using Ocaml instead of sticking with Lua.  Dynamic typing just
+required too much brainpower.  If you find my code hard to read, this
+other <a href="../from-imperative-to-functional">tutorial</a> may help you.</p>
+
+ </article>
+
+    <nav>
+      <a href="/">Home</a>
+      
+<ul>
+<li>
+<a href="/articles/">
+My essays/
+</a>
+
+</li>
+<li>
+<a href="/projects/">
+Projects/
+</a>
+
+</li>
+<li>
+<a href="/tutorials/">
+Tutorials/
+</a>
+<ul>
+<li>
+<a href="/tutorials/poly1305-design">
+The design of Poly1305
+</a>
+
+</li>
+<li>
+<a href="/tutorials/chacha20-design">
+The design of Chacha20
+</a>
+
+</li>
+<li>
+<a href="/tutorials/monty-hall">
+Monty Hall: the Complete and Definitive Solution
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/">
+Earley Parsing Explained/
+</a>
+<ul>
+<li>
+<a href="/tutorials/earley-parsing/what-and-why">
+What is Earley parsing, and why you should care?
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/chart-parsing">
+Chart Parsing
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/recogniser">
+The Recogniser
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/empty-rules">
+Empty Rules
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/right-recursion">
+Optimising Right Recursion
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/parser">
+The Parser
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/semantic-actions">
+Semantic Actions
+</a>
+
+</li>
+</ul>
+</li>
+<li>
+<a href="/tutorials/avoid-assignment">
+How to avoid the assignment statement
+</a>
+
+</li>
+<li>
+<a href="/tutorials/from-imperative-to-functional">
+From Imperative to Functional: how to make the leap.
+</a>
+
+</li>
+<li>
+<a href="/tutorials/ultimate-css-layout">
+My ultimate CSS layout
+</a>
+
+</li>
+</ul>
+</li>
+<li>
+<a href="/contact">
+Contact me
+</a>
+
+</li>
+</ul>
+
+    </nav>
+
+    <footer>
+      Contact, suggestions: Send me an email at
+      <a href="mailto:l@loup-vaillant.fr">l@loup-vaillant.fr</a><br>
+      <a href="/updates">Atom feed</a><br>
+      Built with <a href="/projects/ussm">USSM</a>
+    </footer>
+  
+
+
+</body></html>Ytext/htmlUUTF-8_7http://loup-vaillant.fr/tutorials/earley-parsing/parserP¢Ô_WebResourceResponseOqbplist00ÔnoX$versionX$objectsY$archiverT$top † ¯!#)*0123OPQRSTUVWXYZ[\]^_`abcdeiU$nullİ	
+ !"R$6S$10R$2R$7R$3S$11R$8V$classR$4R$9R$0R$5R$1€	€€€ € €€€Ó$%'(WNS.base[NS.relative€ €€_!http://loup-vaillant.fr/style.cssÒ+,-.Z$classnameX$classesUNSURL¢-/XNSObject#A¾j!e¡ŒÒ ÈÓ456BNWNS.keysZNS.objects«789:;<=>?@A€	€
+€€€€€€€€€«CEFGHIJKLM€€€€€€€€€€€€VServer\Content-TypeTVary]Last-ModifiedTEtag]Accept-RangesTDate_Content-Encoding^Content-LengthZKeep-AliveZConnection_Apache/2.2.16 (Debian)Xtext/css_Accept-Encoding_Mon, 29 Jun 2015 09:44:54 GMT_"32ad-60d-519a4f11b9180"Ubytes_Tue, 28 Feb 2017 21:32:33 GMTTgzipS548_timeout=15, max=100ZKeep-AliveÒ+,fg_NSMutableDictionary£fh/\NSDictionaryÒ+,jk_NSHTTPURLResponse£lm/_NSHTTPURLResponse]NSURLResponse_NSKeyedArchiverÑpq_WebResourceResponse€    # - 2 7 [ a |  ƒ † ‰ Œ  “ š    £ ¦ © « ­ ¯ ± ³ ´ ¶ ¸ º ¼ ¾ À Â É Ñ İ ß á ã &)2;=?FNYegikmoqsuwy{‡‰‹‘“•—™›Ÿ¦³¸ÆËÙŞñ /8Jj…‹«°´ÊÕÚğô2@RUk             r              mO/* reset */
+header, nav, article, footer, body, html, pre code
+{ display:block; margin:0; color:black; }
+
+/* colors */
+html, body { background-color:#fff8f0; }
+footer     { background-color:#f0e4d0; }
+pre code   { background-color:#f0e4d0; }
+
+/* round corners, margins */
+html     { margin:1.5em }
+footer   { border-radius        : 1.5em;
+           -moz-border-radius   : 1.5em;
+           -webkit-border-radius: 1.5em;
+           margin-bottom: 1.5em; padding: 1em; }
+pre code { border-radius        : 1em;
+           -moz-border-radius   : 1em;
+           -webkit-border-radius: 1em;
+           margin: 1em 0 1em 0;
+           padding:0.5em;}
+nav ul   { margin:  0;
+           padding: 0 0 0 1em; }
+header, nav, article { margin-bottom: 1.5em;
+                       padding: 1em; }
+
+/* style */
+a:visited         { color: #822; }
+a:hover           { color: #f50; }
+code              { font-size: 120%; }
+nav a             { text-decoration: none; }
+nav ul, footer    { font-size: 0.83em; }
+nav ul ul         { font-size: 1em; }
+header blockquote { font-style: italic; } /* slogan */
+header #logo      { float: right;
+                    margin-bottom: 2em; }
+h1                { font-size: 180% }
+table tr td       { text-align: center;
+                    padding: 5px; }
+table tr th       { text-align: center;
+                    padding: 5px; }
+
+/* layout */
+body    { width: 63em; margin: auto; }
+article { float:left; margin-left:  18em; width: 42em;   }
+nav     { float:left; margin-left: -61em; width: 14.5em; }
+footer  { clear: both; }
+Xtext/css_!http://loup-vaillant.fr/style.cssÔO%bplist00ÔfgX$versionX$objectsY$archiverT$top † ¯#)*0123KLMNOPQRSTUVWXYZ[\]aU$nullİ	
+ !"R$6S$10R$2R$7R$3S$11R$8V$classR$4R$9R$0R$5R$1€	€€€ €€€€Ó$%'(WNS.base[NS.relative€ €€_#http://loup-vaillant.fr/penrose.pngÒ+,-.Z$classnameX$classesUNSURL¢-/XNSObject#A¾j!e¡Ç ÈÓ456@JWNS.keysZNS.objects©789:;<=>?€	€
+€€€€€€€©ACDEFGHI€€€€€€€€€€VServer\Content-TypeTEtag]Last-ModifiedTDate]Accept-Ranges^Content-LengthZKeep-AliveZConnection_Apache/2.2.16 (Debian)Yimage/png_"22e3-f86-4ba5de191db80"_Sat, 03 Mar 2012 22:04:46 GMT_Fri, 03 Mar 2017 21:54:23 GMTUbytesT3974_timeout=15, max=98ZKeep-AliveÒ+,^__NSMutableDictionary£^`/\NSDictionaryÒ+,bc_NSHTTPURLResponse£de/_NSHTTPURLResponse]NSURLResponse_NSKeyedArchiverÑhi_WebResourceResponse€    # - 2 7 W ] x {  ‚ … ˆ Œ  – ™ œ Ÿ ¢ ¥ § © « ­ ¯ ° ² ´ ¶ ¸ º ¼ ¾ Å Í Ù Û İ ß
+$'09;=DLWacegikmoqs}ƒ…‡‰‹‘˜¥ª¸½ËÚåğ	.Nnty™´¸ÅÊŞâö/             j              1O†‰PNG
+
+   IHDR   ˆ   –   2¸0‹   gAMA  ±üa   PLTE                                                                                                                                                                        ÿ¡5ÿ¡5ÿ¡5ÿ 5ÿš3ÿš3ÿš3ÿš3ÿš3ÿš3ÿ™2ÿ™2ÿ™2ÿ™2ÿ™2ÿ™2ÿ™2ÿ™2ÿ™2ş˜2ş˜2ş˜2ı˜2ü—1û–1÷”1ô’0í/êŒ.â‡,Õ€+Ï}*Æw)Âu)»r)¸r-·r-·q-¶q-¶q-µp*´p,²o,²o,³o,²o,²o,²o,²o,²o,³p,´p,´p-µp-µp,´o,²o,±n,±n,°m,°m,¯m,¯l+®l*­k)­j'©h'§f&¤e& c'b'œa'œa'œa'›`'›_%™^$—]$”[#’Z"X"W!‹U‰SˆSƒR&ƒR&„R'ƒR'„R'†Q…Q‚Q&‚Q&‚Q&€P%€P&€P&€P&€P&€P&€P&€P&€P&€P&€P&P&P&P&P&P&P&ƒO‚O‚OO€O €O"€O$O%O%O%O%~N$|M$xJ#wJ#vI#vH#uH"uH!tG sFqEpDmCkBkBjAi@e>c=`;^9[8Y7W6U5S3Q2L/I-D*@'=&;$8"6!30.+
+(	%	"
+
+
+
+		                                       2&ï   8tRNS        	 #',4>DNT\hpz„™¤­´½ÃÉÒİâåèêîñóùşZe™s   bKGD ˆH  àIDATxÚÅÜ[LÙğ¾ÍªxÙu]uUÄÚ®`–´™Çy›D+¤¤Ïç¡>L¢VØ˜UtuíBşN²'éÓşİİÌƒ·à.( H¡r“K¹XŠ!iG…øüı? ®(mçÓú{n&ŸœùÍé™3¿ß±pl±.k—–°0üvãŞ|«Õfµæïßù!ë³ À@ŞÎŸ²Ûğı×O——•W\îŒ 8zpKæ!Û€Éß%» J¢$
+’²¶ñ—@î–ÌBÖçƒ¿êDI|ÂÉò èàšÌA²rŠ¡õŸ>P,…½là%Šwge²Û•/·!	RÅ`İ™	È¶|`ò²}ÆR”\Ÿò¶¥r°üS‚˜($I(½É£07­¬àU¿Ó!&ÉáXDQöº´A²mÀH¹”ğ®¼—ˆ¦¤J"ÈÖ<ğ3×í)KÇï3ÀÁÍæCÖ,Ó)ˆzC(ı(<`2$+»/\IÔ’Ã5ôf5©²d§˜¨E‡(J¢tz°î0²5˜º^"²‡$Úÿˆ ¹_›É-Ãé$C¡´…7˜*Ë ë²‹Àc ãÖ¥r—S`$Gù£»Ö®
+²ËŠ¥U€Ù‰®ŠI*§¤Ê¿yàùHx(ø¤74>5`²¶T0rƒ-àÀfƒìãà®ÕÉ3^¯Ç[}ñz@¤ó¤‘$¸:€cûAö‚Ÿ¸â&ïC&nO`
+Ğ.9™k/íZÃÙ>pÈ„|HñTÿg_0ğ,KÂ‰Êğ‡·3B²Á÷T-c¼–@è/DÉ@ª´EıY á±‡¬gêz€X—(HFf•àø~H.Âçe’ Ü?¸äd€$ÉQ1ÆÃ¶cNÈà"I29{m
+˜¨12İ
+'jæÁúF¤ ½U2IF©êšú\FREptÌû¿ÔÙR¯')Â[ÛÄºNJWpt_jHÂ$eÈUõão«14Á•œãaÛ‘
+rígtHÈÙ_¢ÀX¥¡YådMü¡­I!_€¯&úÂİz¥ŠÔ9ìÛ’I·¬Ë!o]ˆv8ŒıõG÷&†@_Ñ²ûÊ¯9aäoÙ^9Æ'\ X¸üCô‡LÎıÆN˜U$ÁyaÅ+ŞË+M&Lœ:K¥ŠĞ• U,Y¶WWcxêúFREWpdÏ§ß¥ÎVH•ŸÃ@ÔĞ¬"Ùk&xşöcÈ¦#ó?v	9ÿg)·šUj5,_ X¾<2‘#”ª`èp9Qzcàs²–C^‚™º~`¶ÍĞªI({
+X7›!„Èî_&™JÉĞĞ¥ Û‘Éù¿bÀH¹ÃÈPi/pÀ!2!ı1 ÍĞ¬âh[Ä»ÒÕB!g~ fÿk70ë5<òLƒ²”*§ÙSEr\Xx{wLÈ¤úoo†Ëì’š…¥Œ5Bˆì•Cq ¥ÔÁ'Àó D&äâ ¹å`MZG
+Ö˜!D–İMErÍï0BñV· bÜºo2„ÈŞ³OãÀ­R¦„S<6™!2ñÖ?¦o”°¬ú°ßl!„¸ÿfÛ.àp: 2©nYÀ+ı;ÆRYÜ¶>D®ûÑKdöT©Ô€ß:‡Ä5{ô«³‘¹ Û€„xzuşı¸f
+·¦€œ0ÿç9æÛã© ÚzGd¦h[jˆ„®’e–ñp·E€¡2½ÏpÙ‹ãß¤†ÜÖ€¾:İ©"re˜¾l×=—T@Dyğ˜ïõè“ÈÚ‘WÀu–=7õA¨ÚĞşˆ\;—’"ËŞÚ -TÊ²4±‡uB¨ê¿Ó½Œ×»SNf-3Àh9ÓºQ¨^¥TQ†5 XçIcÀÔÕï÷ÇX *õ7Ñ„³Šì©Ò€§ØŒ’X¥Tõ= ‘kòŠou°*e^-:c2A¨ê¿Ó­áÍx½GştQôÏs`¤œõK (Aäş„RÕç™ôÔ.›UdBê‡™öw±Úƒ&f¥Ty8D;?HùLõ€Ü:e`“\jB©ïq˜~—*²·ºxÍø™øİVVĞİ „¨Ê'À›Ñº*™âşk
+³®˜—®1 ›ªFG„RU¹ıLºj=Şú`æ¦‘M`Qªb­*5¡*¥ÍãÀl—¥ò¿ŸğpUéj ”ªªïI ¼gŠ¢$”Ş ´AEUé*!”RåN?Pal“æê~¨¼½Ò*!”>¾7²mU1
+Ì>ñ½¿Îj!şGÀ÷ìÉQz	ïú—nËç‚ÎëÀÂø}EıàB‡H¢ıê40ùÈO?td"‰bÙú–32‘Î>è»§|r¡LB$áÔU`qünã
+ÊDíµ“Àt«úñ]É(D…²`>èKp¡A$ÁÙúï*¿©Ÿ"I‚óòk,†(jÂedDJ.„H;Mi‡H¢Pæú|TıœIzb@¨IIÊH;Dp^njHÁH/D’5@¤]¥)i„H¢à
+±P£¥MsÇ·¤"	'ºbÀÓû
+Õb)7óŒ@$Áy!†7“U}õ‘–r{Ó¤¤r˜¨T§ƒÒîÔ¾¬i©:c>ä£ºCõ¦Şg„H‚Ğ›ıÃAé]›Í…'jâÀT«AA©2ŒÎLˆä¨æX’ƒRJÕq~‡y·U^ñA…A©2ŠCkMƒH‚£ã0Ü¤PÆh_q&A–Ê»0İêû‘¡*EìæÌ‚Ø+F€xà¶_e_‹ÈåL‚8\@|°A• |Î$ˆĞ67ù)³Cm-"o­9’Ê`ºİÇ>ªroÈÕY¶‘
+²0 h$¥¾î(Ã™âÃ~#¥y°nÕ]ì”|£¦	mVØª_Ñ€=YúË¿’BÔÆ'í>#Œ;İÚ'õÇ)
+â’ˆjä®¨¾Àój'-Y6íŠQˆÑ şÏø•
+-k“Mšñ7Æı›˜ËHM…¨şÛ5ğ‡¾NTXôd¢6´O'.×·pÙ'.56¢<ïK\j¼6YñµY•úãI[:,gE›7½•ŞÌ¥hr±pÜL¤yD|­S<îü"UËBQ¬^ND¥JÓ F(Çq‡ğÄ#§	¢RßÓ˜Ö0Çq;º4ˆ_ÌãÓçD>1qNNDıõÑ#;×êí8ÚtœxÌ†¨Tizª¿¡r©l7øÎ{}ŒCTÚŠ¹›ÙÚãöo?»Â7£•ªí³L”ï÷«ûôÙ94š9šÃ`kC~ßB™S¾ó‡§Øsq4ø[iz
+gë¶ı·©tsøÙÊCÎFÑÊıó ëY–ôÇ¯,+‘'`dĞöˆ‘æ}Ëò#x,×~ğüÈÏĞËöÖÔæQh Gİ²Â!?xßQä~„t¯UÕ¯ŸGaîf4§oÏfş÷¾¼ªcúê¾à·Õ¬vıl0q…,¥ÊŸˆê{»V©Úú|';X}2\{F&„TÍ~]oö÷Ã«9eå#²òŠÁ·U{eÙ=Ša¯úÊ½~ h5§XÃGZÜÄ{‹wSŞ•Æào49Rû±ÛŒÖ2‰ šbæhlÙi;eı@8ßh²/Pªro|Å9«=3'éÑ0ëòŠÁw¼Æ`câ—·»AEy«? +Åa9Û½Tµb4ôÎÛ9.İËùàµ‡JÚ’C÷Jë÷ ¼ø4OšÆ5ğ9ë3wÄÔÆ‚bğ}w>ØeW©rûÑPœgÒ¹NzİúÖ
+ÌŸ²” ¾¦Ğ´ÜÆq™…pÜŞï ~´·õÑÃG­İƒ³ åoç¸ÌC¸»­ øEm€üì¯8î³@8Ûº¯Àj³Ù¬‡ìâLÛÏ×dee­áÒÿ>ù‰´ú„ô    IEND®B`‚Yimage/png_#http://loup-vaillant.fr/penrose.png    1 < N d ‚ ‘ ¨Ä	ÄÄÄSÄTÄWÄ`ÄvÈëÎüÏÏ)Ï2Ó[âåâï                           ã

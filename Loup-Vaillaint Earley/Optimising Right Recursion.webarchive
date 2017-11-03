@@ -1,0 +1,604 @@
+bplist00“_WebMainResource_WebSubresources’	
+_WebResourceData_WebResourceMIMEType_WebResourceTextEncodingName^WebResourceURL_WebResourceFrameNameO;<!DOCTYPE html><html><head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <link rel="stylesheet" href="/style.css">
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <link rel="alternate" type="application/atom+xml" href="/updates.xml">
+    <title>
+Optimising Right Recursion
+</title>
+    <meta name="description" content="
+Our recogniser is quadratic on right-recursive grammars.  Compared to current LR parsers, which are linear, this is a performance bug.  This optimisation fixes it.
+">
+  </head>
+  <body>
+    <header>
+      <img id="logo" width="136" height="150" border="0" src="/penrose.png" alt="logo">
+      <h1>@ Loup's</h1>
+      <blockquote><p>Impossible?  Like that would stop me.</p></blockquote>
+    </header>
+
+    <article> 
+<h1>Optimising Right Recursion</h1>
+
+<p><em>Update, 14/12/2014: Jeffrey Kegler, the author of the Marpa parser,
+posted a
+<a href="https://github.com/jeffreykegler/kollos/blob/master/notes/misc/leo2.md">response</a>
+to this post.  You probably should take a look.</em></p>
+
+<p><em>Note: I have decided not to include this optimisation in the rest of
+the series.  It complicates the core algorithm, has further
+repercussions in the parsing phase, and its performance benefits are
+unclear ‚Äîthey need to be tested. (Leo didn't lie about the complexity
+bounds, but he omitted less interesting considerations such as the
+ever growing memory gap).  Simply put, more research is needed.  I may
+perform it.  Someday.</em></p>
+
+<h2>The problem</h2>
+
+<p>Consider the following grammar:</p>
+
+<pre><code>A -&gt; A 'a'
+A -&gt;
+</code></pre>
+
+<p>Let it parse this input: <code>"aaaaa"</code>.  For now, there's no problem:</p>
+
+<pre><code>=== 0 ===
+A -&gt; ‚Ä¢ A 'a'  (0)
+A -&gt; ‚Ä¢        (0)
+A -&gt; A ‚Ä¢ 'a'  (0)
+
+=== 1 ===
+A -&gt; A 'a' ‚Ä¢  (0)
+A -&gt; A ‚Ä¢ 'a'  (0)
+
+=== 2 ===
+A -&gt; A 'a' ‚Ä¢  (0)
+A -&gt; A ‚Ä¢ 'a'  (0)
+
+=== 3 ===
+A -&gt; A 'a' ‚Ä¢  (0)
+A -&gt; A ‚Ä¢ 'a'  (0)
+
+=== 4 ===
+A -&gt; A 'a' ‚Ä¢  (0)
+A -&gt; A ‚Ä¢ 'a'  (0)
+
+=== 5 ===
+A -&gt; A 'a' ‚Ä¢  (0)
+A -&gt; A ‚Ä¢ 'a'  (0)
+</code></pre>
+
+<p>But then, consider this slightly different grammar (the symbols of the
+first rule have been inverted):</p>
+
+<pre><code>A -&gt; 'a' A
+A -&gt;
+</code></pre>
+
+<p>Upon the same input, it yields <em>this</em>:</p>
+
+<pre><code>=== 0 ===
+A -&gt; ‚Ä¢ 'a' A  (0)
+A -&gt; ‚Ä¢        (0)
+
+=== 1 ===
+A -&gt; 'a' ‚Ä¢ A  (0)
+A -&gt; ‚Ä¢ 'a' A  (1)
+A -&gt; 'a' A ‚Ä¢  (0)
+A -&gt; ‚Ä¢        (1)
+
+=== 2 ===
+A -&gt; 'a' ‚Ä¢ A  (1)
+A -&gt; ‚Ä¢ 'a' A  (2)
+A -&gt; 'a' A ‚Ä¢  (1)
+A -&gt; ‚Ä¢        (2)
+A -&gt; 'a' A ‚Ä¢  (0)
+
+=== 3 ===
+A -&gt; 'a' ‚Ä¢ A  (2)
+A -&gt; ‚Ä¢ 'a' A  (3)
+A -&gt; 'a' A ‚Ä¢  (2)
+A -&gt; ‚Ä¢        (3)
+A -&gt; 'a' A ‚Ä¢  (1)
+A -&gt; 'a' A ‚Ä¢  (0)
+
+=== 4 ===
+A -&gt; 'a' ‚Ä¢ A  (3)
+A -&gt; ‚Ä¢ 'a' A  (4)
+A -&gt; 'a' A ‚Ä¢  (3)
+A -&gt; ‚Ä¢        (4)
+A -&gt; 'a' A ‚Ä¢  (2)
+A -&gt; 'a' A ‚Ä¢  (1)
+A -&gt; 'a' A ‚Ä¢  (0)
+
+=== 5 ===
+A -&gt; 'a' ‚Ä¢ A  (4)
+A -&gt; ‚Ä¢ 'a' A  (5)
+A -&gt; 'a' A ‚Ä¢  (4)
+A -&gt; ‚Ä¢        (5)
+A -&gt; 'a' A ‚Ä¢  (3)
+A -&gt; 'a' A ‚Ä¢  (2)
+A -&gt; 'a' A ‚Ä¢  (1)
+A -&gt; 'a' A ‚Ä¢  (0)
+</code></pre>
+
+<p>Now we have a problem: the previous grammar yielded a reasonable
+number of Earley items, but this one‚Ä¶ grows quadratically.  Such
+problems are expected of Earley's algorithm, but come on!  This
+grammar could be parsed by a simple <a href="https://en.wikipedia.org/wiki/LR_parser" title="Wikipedia">LR parser</a> in linear time!
+We should not need that many Earley items.</p>
+
+<h2>The solution</h2>
+
+<p>The trick was published by <a href="http://www.sciencedirect.com/science/article/pii/030439759190180A" title="Paper">Joop Leo</a> in 1991.  The idea is to
+avoid completing certain key Earley items.</p>
+
+<h3>Deterministic reduction path</h3>
+
+<p>Picture this Earley item (Greek letters denote sequences of symbols):</p>
+
+<pre><code>A -&gt; Œ± ‚Ä¢ (i)
+</code></pre>
+
+<p>The deterministic path, if any, is a chain of Earley items.  The first
+item of this chain, if there is such a thing, satisfies 2 conditions:</p>
+
+<ul>
+<li>It is of the form: <code>X -&gt; Œ≤ A ‚Ä¢ (k)</code></li>
+<li>There is <em>exactly one</em> item of the form <code>X -&gt; Œ≤ ‚Ä¢ A (k)</code> in the
+Earley set <code>S(i)</code>,</li>
+</ul>
+
+<p>Now we can picture <em>this</em> Earley item: <code>X&nbsp;-&gt;&nbsp;Œ≤&nbsp;A&nbsp;‚Ä¢&nbsp;(k)</code> (yes, it's the
+one we just discovered), and find what's just above it.  We can then
+go up the chain until we can't.  The last Earley item we find is
+called the <em>topmost</em> complete item on the deterministic reduction
+path.</p>
+
+<p>By the way, you may notice the eerie similarity with the regular
+completion step.  See, when performing a completion, we check for all
+items of the form <code>X&nbsp;-&gt;&nbsp;Œ≤&nbsp;‚Ä¢&nbsp;A&nbsp;Œ¥&nbsp;(k)</code> in <code>S(i)</code>, so we can add
+<code>X&nbsp;-&gt;&nbsp;Œ≤&nbsp;A&nbsp;‚Ä¢&nbsp;Œ¥&nbsp;(k)</code> to the current Earley set.  The reduction path
+business is only a special case, where <code>Œ¥</code> happens to be empty.</p>
+
+<h3>The algorithm</h3>
+
+<p>We modify the completion step.  Instead of performing a regular
+completion right away, we first examine our Earley item, and check if
+there is a deterministic reduction path.</p>
+
+<ul>
+<li>If there is, we just add the topmost item on this path to the
+current Earley set.</li>
+<li>Otherwise, we perform a regular completion.</li>
+</ul>
+
+<p>The effect of these shenanigans is fairly simple:  if we were doing
+the regular completion, we would end up adding the whole reduction
+path to the current Earley set.  Instead, we just add the topmost
+item, and skip all the others.</p>
+
+<p>Let's take the construction of the final Earley set in our last
+example.  With the regular algorithm, we get this:</p>
+
+<pre><code>=== 5 ===
+A -&gt; 'a' ‚Ä¢ A  (4)  -- scanned previously
+A -&gt; ‚Ä¢ 'a' A  (5)  -- Predicted
+A -&gt; 'a' A ‚Ä¢  (4)  -- Special completion (because A is nullable)
+A -&gt; ‚Ä¢        (5)  -- Predicted
+A -&gt; 'a' A ‚Ä¢  (3)  -- Completed
+A -&gt; 'a' A ‚Ä¢  (2)  -- Completed
+A -&gt; 'a' A ‚Ä¢  (1)  -- Completed
+A -&gt; 'a' A ‚Ä¢  (0)  -- Completed
+</code></pre>
+
+<p>Now see the last four completions?  They're the deterministic
+reduction path of <code>A&nbsp;-&gt;&nbsp;‚Ä¢&nbsp;(5)</code>.  With our new and improved algorithm,
+we would only add the last one.  Here is how it would go.  First, we
+would proceed as usual:</p>
+
+<pre><code>=== 5 ===
+A -&gt; 'a' ‚Ä¢ A  (4)  -- scanned previously
+A -&gt; ‚Ä¢ 'a' A  (5)  -- Predicted
+A -&gt; 'a' A ‚Ä¢  (4)  -- Special completion (because A is nullable)
+A -&gt; ‚Ä¢        (5)  -- Predicted
+</code></pre>
+
+<p>Then, things change as we complete <code>A&nbsp;-&gt;&nbsp;‚Ä¢&nbsp;(5)</code>.  First, we check for
+the presence of an item of the form <code>X&nbsp;-&gt;&nbsp;Œ±&nbsp;‚Ä¢&nbsp;(k)</code> in <code>S(5)</code>.  There
+is one, <em>and only one</em>:</p>
+
+<pre><code>A -&gt; 'a' ‚Ä¢ A  (4)
+</code></pre>
+
+<p>Now, we know that</p>
+
+<pre><code>A -&gt; 'a' A ‚Ä¢  (4)
+</code></pre>
+
+<p>is in the deterministic path.  So, instead of putting it in <code>S(5)</code>
+right away (which by the way wouldn't change a thing, since it is
+already present), we go up the chain, and look for an item of the form
+<code>X&nbsp;-&gt;&nbsp;Œ±&nbsp;‚Ä¢&nbsp;(k)</code>, but this time, in <code>S(4)</code>.  And lo and behold, we find‚Ä¶</p>
+
+<pre><code>A -&gt; 'a' ‚Ä¢ A  (3)
+</code></pre>
+
+<p>So the next item up the chain is</p>
+
+<pre><code>A -&gt; 'a' A ‚Ä¢  (3)
+</code></pre>
+
+<p>And so on until we find the topmost item:</p>
+
+<pre><code>A -&gt; 'a' A ‚Ä¢  (0)
+</code></pre>
+
+<p>And we just add that.  We therefore get this:</p>
+
+<pre><code>=== 5 ===
+A -&gt; 'a' ‚Ä¢ A  (4)  -- scanned previously
+A -&gt; ‚Ä¢ 'a' A  (5)  -- Predicted
+A -&gt; 'a' A ‚Ä¢  (4)  -- Special completion (because A is nullable)
+A -&gt; ‚Ä¢        (5)  -- Predicted
+A -&gt; 'a' A ‚Ä¢  (0)  -- Topmost item in the deterministic reduction path
+</code></pre>
+
+<p>Now the number of items can stop growing at each step.  Here what it
+would do to the whole thing:</p>
+
+<pre><code>=== 0 ===
+A -&gt; ‚Ä¢ 'a' A  (0)
+A -&gt; ‚Ä¢        (0)
+
+=== 1 ===
+A -&gt; 'a' ‚Ä¢ A  (0)
+A -&gt; ‚Ä¢ 'a' A  (1)
+A -&gt; 'a' A ‚Ä¢  (0)
+A -&gt; ‚Ä¢        (1)
+
+=== 2 ===
+A -&gt; 'a' ‚Ä¢ A  (1)
+A -&gt; ‚Ä¢ 'a' A  (2)
+A -&gt; 'a' A ‚Ä¢  (1)
+A -&gt; ‚Ä¢        (2)
+A -&gt; 'a' A ‚Ä¢  (0)
+
+=== 3 ===
+A -&gt; 'a' ‚Ä¢ A  (2)
+A -&gt; ‚Ä¢ 'a' A  (3)
+A -&gt; 'a' A ‚Ä¢  (2)
+A -&gt; ‚Ä¢        (3)
+A -&gt; 'a' A ‚Ä¢  (0)
+
+=== 4 ===
+A -&gt; 'a' ‚Ä¢ A  (3)
+A -&gt; ‚Ä¢ 'a' A  (4)
+A -&gt; 'a' A ‚Ä¢  (3)
+A -&gt; ‚Ä¢        (4)
+A -&gt; 'a' A ‚Ä¢  (0)
+
+=== 5 ===
+A -&gt; 'a' ‚Ä¢ A  (4)
+A -&gt; ‚Ä¢ 'a' A  (5)
+A -&gt; 'a' A ‚Ä¢  (4)
+A -&gt; ‚Ä¢        (5)
+A -&gt; 'a' A ‚Ä¢  (0)
+</code></pre>
+
+<p>Okay, that's still more than the left recursive version.  Still, the
+number of Earley items per set is now bounded.  We got our linear
+parsing back‚Ä¶</p>
+
+<h3>The <em>real</em> algorithm</h3>
+
+<p>‚Ä¶mostly.  In case you didn't notice, checking the reduction path takes
+time.  And the further we go into the parse, the longer the reduction
+path is, the longer it takes to go to the top.  Even worse, we are
+checking and re-checking the <em>same</em> reduction path over and over!  So,
+while we got spatial complexity back to normal, the temporal
+complexity is still quadratic.</p>
+
+<p>The obvious solution: cache the topmost item in the reduction path.
+Next time we check we won't have to go up the whole chain all over
+again.  To perform the cache, we use what Leo calls <em>transitive
+items</em>.  A transitive item is something of the form:</p>
+
+<pre><code>X -&gt; Œ± ‚Ä¢  (i), Y
+</code></pre>
+
+<p>where <code>X</code> and <code>Y</code> are non-terminal symbols, and <code>Œ±</code> is a sequence of
+symbols (terminal or non-terminal).  Basically, it is a completed
+Earley item, with a symbol attached.  The Earley item itself is the
+topmost item on some reduction path.  The symbol tells us <em>which</em>
+reduction path is involved.</p>
+
+<p>Oh, I didn't tell you: at any given point in the parse, you can't find
+more deterministic paths than non-terminal symbols in the grammar.
+Looking back at the definition of deterministic paths, it should have
+been obvious.  (I actually missed it, and got the tip from Jeffrey
+Kegler, in his <a href="https://jeffreykegler.github.io/Marpa-web-site/">Marpa parser</a> paper.)  In our example above,
+for instance, there is only one non-terminal symbol (<code>A</code>).  So, there
+is only one deterministic reduction path.</p>
+
+<p>Now, when we find the topmost item in the reduction path, we add the
+corresponding transitive item to the current Earley set.  And all the
+Earley sets we just examined, while we're at it.</p>
+
+<p><em>(That last one bothers me.  We used to only touch two Earley sets:
+the current one (predictions and completions), and the next one
+(scans).  This could enable the use of a neat dynamic array for the
+whole thing.  But with this new "optimisation", we now have to deal
+with arbitrary insertions.  This could be a performance killer: arrays
+aren't exactly insertion friendly, and anything else likely involve an
+uncanny amount of pointer chasing.  Maybe we can mitigate the damage
+with some kind of cache aware data structure, but I shudder at the
+sheer complexity.)</em></p>
+
+<p>In our example it would go like this:</p>
+
+<pre><code>=== 0 ===
+A -&gt; ‚Ä¢ 'a' A  (0) -- as usual
+A -&gt; ‚Ä¢        (0) -- as usual
+
+=== 1 ===
+A -&gt; 'a' ‚Ä¢ A  (0) -- as usual
+A -&gt; ‚Ä¢ 'a' A  (1) -- as usual
+A -&gt; 'a' A ‚Ä¢  (0) -- Search for the topmost item -there is none.
+A -&gt; ‚Ä¢        (1) -- as usual
+A : A -&gt; 'a' A ‚Ä¢ (1) &lt;‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄ‚îÄthis transitive item‚îÄ‚îÄ‚îÄ‚îÄ‚îê
+                                                       ‚îÇ
+=== 2 ===                                              ‚îÇ
+A -&gt; 'a' ‚Ä¢ A  (1) -- as usual                          ‚îÇ
+A -&gt; ‚Ä¢ 'a' A  (2) -- as usual                          ‚îÇ
+A -&gt; 'a' A ‚Ä¢  (1) -- Search for the topmost item       ‚îÇ
+                     Finds A -&gt; 'a' ‚Ä¢ A  (0), creates ‚îÄ‚îò
+A : A -&gt; 'a' A ‚Ä¢ (1) &lt;‚îÄ‚îÄ‚îÄ And this one one as well
+                          (Yes, it is the same)
+A -&gt; ‚Ä¢        (2) -- Search for the topmost item,
+                     finds the transitive item above
+A -&gt; 'a' A ‚Ä¢  (0) -- Search for the same topmost item,
+                     there is none.
+</code></pre>
+
+<p>This little dances then goes on in the same fashion:</p>
+
+<pre><code>=== 3 ===
+A -&gt; 'a' ‚Ä¢ A  (2)
+A -&gt; ‚Ä¢ 'a' A  (3)
+A -&gt; 'a' A ‚Ä¢  (2)
+A : A -&gt; 'a' A ‚Ä¢ (1) -- copy of the transitive item above
+A -&gt; ‚Ä¢        (3)
+A -&gt; 'a' A ‚Ä¢  (0)
+
+=== 4 ===
+A -&gt; 'a' ‚Ä¢ A  (3)
+A -&gt; ‚Ä¢ 'a' A  (4)
+A -&gt; 'a' A ‚Ä¢  (3)
+A : A -&gt; 'a' A ‚Ä¢ (1) -- copy of the transitive item above
+A -&gt; ‚Ä¢        (4)
+A -&gt; 'a' A ‚Ä¢  (0)
+
+=== 5 ===
+A -&gt; 'a' ‚Ä¢ A  (4)
+A -&gt; ‚Ä¢ 'a' A  (5)
+A -&gt; 'a' A ‚Ä¢  (4)
+A : A -&gt; 'a' A ‚Ä¢ (1) -- copy of the transitive item above
+A -&gt; ‚Ä¢        (5)
+A -&gt; 'a' A ‚Ä¢  (0)
+</code></pre>
+
+<p>More or less.  Sorry for the lack of details (especially with respect
+to empty rules), I'm not very motivated to flesh it out right now: I'm
+not sure this optimisation is worth the trouble, and the rest of the
+series is more important anyway.</p>
+
+ </article>
+
+    <nav>
+      <a href="/">Home</a>
+      
+<ul>
+<li>
+<a href="/articles/">
+My essays/
+</a>
+
+</li>
+<li>
+<a href="/projects/">
+Projects/
+</a>
+
+</li>
+<li>
+<a href="/tutorials/">
+Tutorials/
+</a>
+<ul>
+<li>
+<a href="/tutorials/poly1305-design">
+The design of Poly1305
+</a>
+
+</li>
+<li>
+<a href="/tutorials/chacha20-design">
+The design of Chacha20
+</a>
+
+</li>
+<li>
+<a href="/tutorials/monty-hall">
+Monty Hall: the Complete and Definitive Solution
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/">
+Earley Parsing Explained/
+</a>
+<ul>
+<li>
+<a href="/tutorials/earley-parsing/what-and-why">
+What is Earley parsing, and why you should care?
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/chart-parsing">
+Chart Parsing
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/recogniser">
+The Recogniser
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/empty-rules">
+Empty Rules
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/right-recursion">
+Optimising Right Recursion
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/parser">
+The Parser
+</a>
+
+</li>
+<li>
+<a href="/tutorials/earley-parsing/semantic-actions">
+Semantic Actions
+</a>
+
+</li>
+</ul>
+</li>
+<li>
+<a href="/tutorials/avoid-assignment">
+How to avoid the assignment statement
+</a>
+
+</li>
+<li>
+<a href="/tutorials/from-imperative-to-functional">
+From Imperative to Functional: how to make the leap.
+</a>
+
+</li>
+<li>
+<a href="/tutorials/ultimate-css-layout">
+My ultimate CSS layout
+</a>
+
+</li>
+</ul>
+</li>
+<li>
+<a href="/contact">
+Contact me
+</a>
+
+</li>
+</ul>
+
+    </nav>
+
+    <footer>
+      Contact, suggestions: Send me an email at
+      <a href="mailto:l@loup-vaillant.fr">l@loup-vaillant.fr</a><br>
+      <a href="/updates">Atom feed</a><br>
+      Built with <a href="/projects/ussm">USSM</a>
+    </footer>
+  
+
+
+</body></html>Ytext/htmlUUTF-8_@http://loup-vaillant.fr/tutorials/earley-parsing/right-recursionP¢‘_WebResourceResponseOqbplist00‘noX$versionX$objectsY$archiverT$top Ü†Ø!#)*0123OPQRSTUVWXYZ[\]^_`abcdeiU$null›	
+ !"R$6S$10R$2R$7R$3S$11R$8V$classR$4R$9R$0R$5R$1Ä	ÄÄÄ Ä ÄÄÄ”$%'(WNS.base[NS.relativeÄ ÄÄ_!http://loup-vaillant.fr/style.css“+,-.Z$classnameX$classesUNSURL¢-/XNSObject#Aæj!aiÚà »”456BNWNS.keysZNS.objects´789:;<=>?@AÄ	Ä
+ÄÄÄÄÄÄÄÄÄ´CEFGHIJKLMÄÄÄÄÄÄÄÄÄÄÄÄVServer\Content-TypeTVary]Last-ModifiedTEtag]Accept-RangesTDate_Content-Encoding^Content-LengthZKeep-AliveZConnection_Apache/2.2.16 (Debian)Xtext/css_Accept-Encoding_Mon, 29 Jun 2015 09:44:54 GMT_"32ad-60d-519a4f11b9180"Ubytes_Tue, 28 Feb 2017 21:32:33 GMTTgzipS548_timeout=15, max=100ZKeep-Alive“+,fg_NSMutableDictionary£fh/\NSDictionary“+,jk_NSHTTPURLResponse£lm/_NSHTTPURLResponse]NSURLResponse_NSKeyedArchiver—pq_WebResourceResponseÄ    # - 2 7 [ a |  É Ü â å ê ì ö ù † £ ¶ © ´ ≠ Ø ± ≥ ¥ ∂ ∏ ∫ º æ ¿ ¬ … — › ﬂ · „ &)2;=?FNYegikmoqsuwy{áâãçèëìïóôõùü¶≥∏∆ÀŸﬁÒ /8JjÖã´∞¥ ’⁄Ù2@RUk             r              mO/* reset */
+header, nav, article, footer, body, html, pre code
+{ display:block; margin:0; color:black; }
+
+/* colors */
+html, body { background-color:#fff8f0; }
+footer     { background-color:#f0e4d0; }
+pre code   { background-color:#f0e4d0; }
+
+/* round corners, margins */
+html     { margin:1.5em }
+footer   { border-radius        : 1.5em;
+           -moz-border-radius   : 1.5em;
+           -webkit-border-radius: 1.5em;
+           margin-bottom: 1.5em; padding: 1em; }
+pre code { border-radius        : 1em;
+           -moz-border-radius   : 1em;
+           -webkit-border-radius: 1em;
+           margin: 1em 0 1em 0;
+           padding:0.5em;}
+nav ul   { margin:  0;
+           padding: 0 0 0 1em; }
+header, nav, article { margin-bottom: 1.5em;
+                       padding: 1em; }
+
+/* style */
+a:visited         { color: #822; }
+a:hover           { color: #f50; }
+code              { font-size: 120%; }
+nav a             { text-decoration: none; }
+nav ul, footer    { font-size: 0.83em; }
+nav ul ul         { font-size: 1em; }
+header blockquote { font-style: italic; } /* slogan */
+header #logo      { float: right;
+                    margin-bottom: 2em; }
+h1                { font-size: 180% }
+table tr td       { text-align: center;
+                    padding: 5px; }
+table tr th       { text-align: center;
+                    padding: 5px; }
+
+/* layout */
+body    { width: 63em; margin: auto; }
+article { float:left; margin-left:  18em; width: 42em;   }
+nav     { float:left; margin-left: -61em; width: 14.5em; }
+footer  { clear: both; }
+Xtext/css_!http://loup-vaillant.fr/style.css‘O%bplist00‘fgX$versionX$objectsY$archiverT$top Ü†Ø#)*0123KLMNOPQRSTUVWXYZ[\]aU$null›	
+ !"R$6S$10R$2R$7R$3S$11R$8V$classR$4R$9R$0R$5R$1Ä	ÄÄÄ ÄÄÄÄ”$%'(WNS.base[NS.relativeÄ ÄÄ_#http://loup-vaillant.fr/penrose.png“+,-.Z$classnameX$classesUNSURL¢-/XNSObject#Aæj!ajl »”456@JWNS.keysZNS.objects©789:;<=>?Ä	Ä
+ÄÄÄÄÄÄÄ©ACDEFGHIÄÄÄÄÄÄÄÄÄÄVServer\Content-TypeTEtag]Last-ModifiedTDate]Accept-Ranges^Content-LengthZKeep-AliveZConnection_Apache/2.2.16 (Debian)Yimage/png_"22e3-f86-4ba5de191db80"_Sat, 03 Mar 2012 22:04:46 GMT_Fri, 03 Mar 2017 21:54:23 GMTUbytesT3974_timeout=15, max=98ZKeep-Alive“+,^__NSMutableDictionary£^`/\NSDictionary“+,bc_NSHTTPURLResponse£de/_NSHTTPURLResponse]NSURLResponse_NSKeyedArchiver—hi_WebResourceResponseÄ    # - 2 7 W ] x {  Ç Ö à å è ñ ô ú ü ¢ • ß © ´ ≠ Ø ∞ ≤ ¥ ∂ ∏ ∫ º æ ≈ Õ Ÿ € › ﬂ
+$'09;=DLWacegikmoqs}ÅÉÖáâãçèëò•™∏ΩÀ⁄Â	.Nntyéôû¥∏≈ ﬁ‚ˆ/             j              1OÜâPNG
+
+   IHDR   à   ñ   2∏0ã   gAMA  ±è¸a   PLTE                                                                                                                                                                        ˇ°5ˇ°5ˇ°5ˇ†5ˇö3ˇö3ˇö3ˇö3ˇö3ˇö3ˇô2ˇô2ˇô2ˇô2ˇô2ˇô2ˇô2ˇô2ˇô2˛ò2˛ò2˛ò2˝ò2¸ó1˚ñ1˜î1Ùí0Ìé/Íå.‚á,’Ä+œ}*∆w)¬u)ªr)∏r-∑r-∑q-∂q-∂q-µp*¥p,≤o,≤o,≥o,≤o,≤o,≤o,≤o,≤o,≥p,¥p,¥p-µp-µp,¥o,≤o,±n,±n,∞m,∞m,Øm,Øl+Æl*≠k)≠j'©h'ßf&§e&†c'ûb'úa'úa'úa'õ`'õ_%ô^$ó]$î[#íZ"êX"çW!ãUâSàSÉR&ÉR&ÑR'ÉR'ÑR'ÜQÖQÇQ&ÇQ&ÇQ&ÄP%ÄP&ÄP&ÄP&ÄP&ÄP&ÄP&ÄP&ÄP&ÄP&ÄP&ÅP&ÅP&ÅP&ÅP&ÅP&ÅP&ÉOÇOÇOÅOÄO ÄO"ÄO$O%O%O%O%~N$|M$xJ#wJ#vI#vH#uH"uH!tG sFqEpDmCkBkBjAi@e>c=`;^9[8Y7W6U5S3Q2L/I-D*@'=&;$8"6!30.+
+(	%	"
+
+
+
+		                                       è2&Ô   8tRNS        	 #',4>DNT\hpzÑêô§≠¥Ω√…“›‚ÂËÍÓÒÛ˘˛Zeôs   bKGD àH  ‡IDATx⁄≈‹[LŸæÕ™xŸu]uUƒ⁄Æ`ñ¥ô«yõD+§§œÁ°>L¢VÿòUtuÌB˛N≤è'È”˛››ÃÉ∑‡.(†H°rìKπXä!iGÖ¯¸˝?†Æ(mÁ”˙{n&üú˘ÕÈô3øﬂ±pl±.kóñ∞0¸v„ﬁ|´’fµÊÔﬂ˘!Î≥ ¿@ﬁŒçü≤€˝◊OóóïW\Óå 8zpKÊ!€Ä…ﬂ%ª J¢$
+éí≤∂Òó@ÓñÃB÷ÁÉøÍDI|¬…Ú†Ë‡öÃA≤rä°ıü>P,ÖΩl‡%äwge≤€ï/ç∑!	R≈`›ô	»∂|`Ú≤}∆Rî\üÚ∂•r∞¸çSÇò($I(Ω…£07≠ê¨‡Uø”!&…·XDQˆ∫¥A≤m¿HπîÆºóà¶§J"»÷<3◊Ì)K«Ô3¿¡ÕÊC÷,”)àzC(˝(<`2$+ª/\I‘í√5Ùf5©≤dßò®Eá(J¢tz∞Ó0≤5ò∫^"≤á$⁄ˇà π_õ…-√Èê$C°¥Ö7ò*À Î≤ã¿c†„÷•róS`$G˘è£ª÷Æ
+≤Àä•UÄŸâÆäIê*ßç§ øêçy‡˘Hx(¯§74>5`≤∂T0rÉ-‡¿fÉêÏ„‡Æ’…û3^Ø«[}Òz@§Û§ë$∏:Äc˚AˆÇü∏‚&ÔC&nO`
+–.9ôk/éÌZ√Ÿ>pû»Ñ|HÒTˇg_0,K¬â á∑3B≤¡˜T-cºñ@Ë/D…@™¥EÅ˝Y é·±á¨gÍzÄXó(HFfï‡¯~H.¬Áeí ‹?é∏‰dÄ$…Q1∆√∂cçN»‡"I29{m
+ò®12›
+'jÊ¡˙F§ ΩU2IF©Íö˙\FREptÃ˚ø‘ŸRØ')¬[€ƒ∫NJWpt_jH¬$e»Uı„o´14¡ïú„a€ë
+rÌgtH»Ÿ_¢¿X•°YÂdM¸°≠I!_ÄØ&˙¬›zç•ä‘9Ï€êíçI∑¨À!o]àv8å˝ıG˜&Ü@_—≤˚ Ø9a‰oŸ^9∆'\ X∏¸CÙáLŒ˝∆NòU$¡ya≈+ﬁÀ+M&Lú:K•ä–ï U,Y∂WWcxÍ˙ÅFREWpdœßêﬂ•ûŒVHïü√@‘–¨"Ÿk&x˛ˆc»¶#Û?v	9ˇg)∑öUj5,_ Xæ<2ë#î™`Ëp9Qzc‡s≤ñC^Çôê∫~`∂Õ–™I({
+X7õ!Ñ»Ó_&ÅôJ…––• €ë…˘øb¿Hπ√»Pi/p¿!2!˝1†Õ–¨‚h[ƒª“’B!g~ fˇk70Î5<ÚLÉ≤î*ßŸSEr\Xx{wLÅ»§˙ooÜÀÏíöÖ•å5BàÏïCq†•‘¡û'¿Û D&‰‚ πÂ`MZG
+÷ò!Dñ›MErÕÔ0BÒV∑ b‹∫êo2Ñ»ﬁ≥O„¿≠R¶ÑS<6ô!2Ò÷?¶oî∞¨˙∞ﬂl!Ñ∏ˇûf€.‡p: 2©nY¿+˝;∆RY‹∂>DÆ˚—KdˆT©‘Äﬂù:áƒ5{Ù´ê≥ëπ†€ÄÑxzu˛˝∏f
+∑¶Äú0ˇÁ9Ê€„© ⁄zGd¶h[jàÑÆíeñÒp∑EÄ°2ΩœpŸã„ﬂ§Ü‹÷Äæ:›©"reòæl◊=óT@DyòÔıËì»û⁄ëW¿uñè=7ıA®⁄–˛à\;óí"Àﬁ⁄ -T ≤4±áuB®Íø”Ωå◊ªSNf-3¿h9”∫Q®Å^•TQÜ5 XÁIûc¿‘’Ô˜«X *ı7è—ûÑ≥äÏ©“ÄßÿåíX•Tı=é ëkÚäou∞*e^-:cç2A®Íø”≠·ÕxΩG˛tQÙœs`§úıK†(ùA‰˛ÑR’ÁôÙ‘.õUdBÍáÅôˆw±⁄É&f•Ty8D;?H˘LıÄ‹:e`ì\jB©Ôqò~ó*≤∑∫xÕ¯ô¯›VV–›†Ñ® ù'¿õ—∫*ô‚˛k
+≥ÆòóÆ1†õ™FGÑRUπ˝L∫j=ﬁ˙`Ê¶ëM`Q™b≠ç*5°*•Õ„¿lóÅ•ÚøüÅpUÈj î™™ÔI ºgä¢$îﬁ ¥AEUÈ*!îRÂN?PalìÊÍ~®ºΩ“*!î>æ7≤mU1
+Ã>ÒΩøŒj!˛G¿˜Ï…Qz	Ô˙ónÀÁÇŒÎ¿¬¯}E˝‡BáH¢˝Í40˘»O?td"âbŸ˙ñ32ëŒ>Ëªß|r°LB$·‘U`q¸n„
+ DÌµì¿t´˙Ò]…(DÖ≤`>ËKp°A$¡Ÿ˙Ô*ø©ü"IÇÛÚk,Ü(j¬edDJ.ÑÅH;MiáH¢PÊ˙|T˝úIêzb@®II H;Dp^njH¡H/Dí5@§]•)iÑH¢‡
+±P£•Ms«∑§"	'∫b¿”˚
+’b)7Ûå@$¡y!Ü7ìU}ıëñr{”§§rò®TßÉ“Ó‘æ¨i©:c>‰£∫Cıç¶ﬁgÑHÇ–õ˝√AÈ]õÕÖ'j‚¿T´èAA©2åŒLà‰®ÊXíÉRJ’q~áyê∑U^ÒAÖçA©2äCkMÉHÇ£„0‹§P∆h_q&Añ ª0›Í˚çë°*ÅEÏÊÃÇÿ+FÄx‡∂_eè_ã»ÂLÇ8\ù@|∞ÅùAï è|Œ$à–67˘)≥Cm-"o≠9êí `∫›«>™ro»’Y∂ë
+≤0 hè$•æÓ(ê√ô‚√~#•y∞n’]Ïî|£¶	mVÿ™_—Ä=Y˙ÀøíB‘∆'Ì>#å;›⁄'ı«)
+‚íèàj‰Æ®æ¿Ûj'-Y6ÌäQàÅ—†˛œ¯ï
+è-kìMöÒ7∆Å˝õòÀHMÖ®˛€è5áæNTXÙd¢6¥O'.◊∑pŸ'.56¢<éÔK\jº6YÒµYï˙„I[:,gEõ7ΩïﬁÃ•hr±p‹L§yD|≠S<éÓ¸"UÀBQ¨^ND•J”†éF(«qáƒ#ß	¢Rﬂ”òû÷0«q;Å∫4çà_Ã„”ÁDç>1qNND˝ı—è#;◊ÍÌ8⁄túxÃÜ®Tiz™ø°r©l7¯Œ{}åCT⁄äπõŸ⁄„ˆÅo?ª¬7£ï™Ì≥LùîÔ˜Å´˚ÙŸ94ö9ö√`kC~ﬂBôSæÛáèßÿsq4¯[iz
+gÎ∂˝∑©ts¯Ÿéè CŒF— û˝Û ÎYñèÙ«Ø,+ë'`d–ˆàëÊ}ÀÚ#x,◊~¸»œ–Àˆ÷‘ÊQh†G›≤¬!?xﬂQ‰~ÑtØèU’ØüGaÓf4ßoœf˛˜æº™c˙Íæ‡ê∑’¨v˝l0qÖ,• üàÍ{ªV©⁄˙|';X}2\{F&ÑTÕ~]oˆ˜√´9eÂ#≤Úä¡∑U{eŸ=äaØ˙ Ω~†h5ßXè√GZ‹ƒ{ãwSﬁï∆‡o49R˚±€å÷2â†öbÊhùlŸi;e˝@8ﬂéh≤/P™ro|≈9´=3'È—0ÎÚä¡wº∆`c‚ó∑ªAEy´? +≈a9€ÅΩTµb4ÙŒ€9.›éÀ˘‡µáJ⁄íC˜ÅJÎ˜ º¯4Oö∆59Î3wƒ‘∆Çb}w>ÿeW©r˚—Púg“πNz›˙÷
+Ãü≤î†çæ¶–¥‹∆qôÖp‹ﬁÔ ~¥∑ı—√G≠›É≥ éÂoÁ∏ÃC∏ª≠ ¯EmÅÄ¸ÏØ8Ó≥@8é€∫Ø¿j≥Ÿ¨áÏ‚L€œ◊dee≠·“ˇ>˘â¥˙ÑÙ    IENDÆB`ÇYimage/png_#http://loup-vaillant.fr/penrose.png    1 < N d Ç ë ®;»;“;ÿ<<<<(<>@≥FƒFÕFÒF˙K#Z≠Z∑                           Z›
