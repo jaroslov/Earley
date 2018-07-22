@@ -17,8 +17,8 @@ endif
 ACCELERATE	:=
 CC			:= $(ACCELERATE) clang
 CXX			:= $(ACCELERATE) clang++
-CFLAGS		?=
-CXXFLAGS	?=
+CFLAGS		?= -g
+CXXFLAGS	?= -g
 CFLAGSi		:= $(CFLAGS) -std=c11
 CXXFLAGSi	:= $(CXXFLAGS) -std=c++11
 

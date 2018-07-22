@@ -47,7 +47,7 @@ extern "C"
 
     There are three phases to the Earley parser generator:
 
-        1. Random-access table;
+        1. Random-access and alternate random-access table;
         2. Optionally, null-set discovery;
         3. Parsing.
 
@@ -57,7 +57,14 @@ extern "C"
     Random-access table
     -------------------
     Generates a fast-lookup table that resolves the location of the sequences
-    in the grammar. This allows O(1) lookup of grammar rules.
+    in the grammar. This allows O(1) lookup of grammar rules. There are two
+    tables:
+        int RAT[][2]    range of alternates
+        int *ARAT[]     points into the grammar
+    The RAT[][2] points to a subset of the ARAT table.
+    The *ARAT[] points into the grammar
+
+    The user is responsible for sizing both of these arrays.
 
     Null-set discovery
     ------------------
@@ -68,12 +75,26 @@ extern "C"
 */
 
 typedef int   (*morningGetNextLex)(void* cb, int* nextLex);
+typedef int   (*morningAddItem)(void* cb, int index, int rule, int alt, int pos);
 typedef void* (*morningSemanticAction)(void* cb, int rule, int subrule, void* previous);
 typedef int   (*morningBadParse)(void* cb, int rule, int subrule, int stop);
 
-int morningBuildRandomAccessTable(int* Grammar, int NumRules, int** RAT);
-int morningBuildNullKernel(int NumRules, int** RAT, int nullTerminal, int* nullSet);
-int morningParse(int NumRules, int** RAT, int nullTerminal, int* nullSet, void* cb, morningGetNextLex GetNextLex, morningSemanticAction Action, morningBadParse badParse);
+typedef void* MorningParseOpts;
+
+int morningParseOptsSize();
+MorningParseOpts morningMakeParseOpts(void* scratch);
+
+int morningAddGrammar(MorningParseOpts, int* Grammar, int NumRules);
+int morningAddRandomAccessTable(MorningParseOpts, int (*RAT)[2], int** ARAT);
+int morningAddNullKernel(MorningParseOpts, int nullTerminal, int* nullSet);
+int morningAddGetNextLex(MorningParseOpts, morningGetNextLex);
+int morningAddAddItem(MorningParseOpts, morningAddItem);
+int morningAddSemanticActions(MorningParseOpts, morningSemanticAction);
+int morningAddBadParse(MorningParseOpts, morningBadParse);
+
+int morningBuildRandomAccessTable(MorningParseOpts);
+int morningBuildNullKernel(MorningParseOpts);
+int morningParse(MorningParseOpts, void* cb);
 
 #ifdef __cplusplus
 } // extern "C"
@@ -83,55 +104,163 @@ int morningParse(int NumRules, int** RAT, int nullTerminal, int* nullSet, void* 
 
 #ifdef  MORNING_CPP_IMPL
 
+#ifdef  MORNING_TESTING
+#include <stdio.h>
+#endif//MORNING_TESTING
+
 #ifdef __cplusplus
 extern "C"
 {
 #endif
 
-int morningBuildRandomAccessTable(int* Grammar, int NumRules, int** RAT)
+typedef struct MorningParseOptsT
 {
-    int* G  = Grammar;
-    for (int RR = 0; RR < NumRules; ++RR)
+    int*                    Grammar;
+    int                     NumRules;
+    int                   (*RAT)[2];
+    int**                   ARAT;
+    int                     NullTerminal;
+    int*                    NullSet;
+    morningGetNextLex       GetNextLex;
+    morningAddItem          AddItem;
+    morningSemanticAction   SemanticAction;
+    morningBadParse         BadParse;
+} MorningParseOptsT;
+
+int morningParseOptsSize()
+{
+    return sizeof(MorningParseOptsT);
+}
+
+MorningParseOpts morningMakeParseOpts(void* scratch)
+{
+    for (int II = 0; II < sizeof(MorningParseOptsT); ++II)
     {
-        RAT[RR] = G;
-        for (int* AA = G; *AA; ++AA)
+        ((unsigned char*)scratch)[II]   = 0;
+    }
+    return (MorningParseOpts)scratch;
+}
+
+int morningAddGrammar(MorningParseOpts mp, int* Grammar, int NumRules)
+{
+    MorningParseOptsT* mpo  = (MorningParseOptsT*)mp;
+    if (!mpo) return 0;
+    if (!Grammar) return 0;
+    if (NumRules < 1) return 0;
+    mpo->Grammar    = Grammar;
+    mpo->NumRules   = NumRules;
+    return 1;
+}
+
+int morningAddRandomAccessTable(MorningParseOpts mp, int (*RAT)[2], int** ARAT)
+{
+    MorningParseOptsT* mpo  = (MorningParseOptsT*)mp;
+    if (!mpo) return 0;
+    if (!RAT) return 0;
+    mpo->RAT    = RAT;
+    mpo->ARAT   = ARAT;
+    return 1;
+}
+
+int morningAddNullKernel(MorningParseOpts mp, int nullTerminal, int* nullSet)
+{
+    MorningParseOptsT* mpo  = (MorningParseOptsT*)mp;
+    if (!mpo) return 0;
+    if (!nullSet) return 0;
+    mpo->NullTerminal   = nullTerminal;
+    mpo->NullSet        = nullSet;
+    return 1;
+}
+
+int morningAddGetNextLex(MorningParseOpts mp, morningGetNextLex GetNextLex)
+{
+    MorningParseOptsT* mpo  = (MorningParseOptsT*)mp;
+    if (!mpo) return 0;
+    if (!GetNextLex) return 0;
+    mpo->GetNextLex     = GetNextLex;
+    return 1;
+}
+
+int morningAddAddItem(MorningParseOpts mp, morningAddItem AddItem)
+{
+    MorningParseOptsT* mpo  = (MorningParseOptsT*)mp;
+    if (!mpo) return 0;
+    if (!AddItem) return 0;
+    mpo->AddItem        = AddItem;
+    return 1;
+}
+
+int morningAddSemanticActions(MorningParseOpts mp, morningSemanticAction SemanticAction)
+{
+    MorningParseOptsT* mpo  = (MorningParseOptsT*)mp;
+    if (!mpo) return 0;
+    if (!SemanticAction) return 0;
+    mpo->SemanticAction = SemanticAction;
+    return 1;
+}
+
+int morningAddBadParse(MorningParseOpts mp, morningBadParse BadParse)
+{
+    MorningParseOptsT* mpo  = (MorningParseOptsT*)mp;
+    if (!mpo) return 0;
+    if (!BadParse) return 0;
+    mpo->BadParse       = BadParse;
+    return 1;
+}
+
+int morningBuildRandomAccessTable(MorningParseOpts mp)
+{
+    MorningParseOptsT* mpo  = (MorningParseOptsT*)mp;
+    if (!mpo) return 0;
+    if (!mpo->Grammar) return 0;
+    if (mpo->NumRules < 1) return 0;
+    int* G  = mpo->Grammar;
+    for (int RR = 0, II = 0; RR < mpo->NumRules; ++RR, ++G)
+    {
+        mpo->RAT[RR][0]     = II;
+        for (int* AA = G; *AA; ++II)
         {
-            for (int* SS = AA; *SS; ++SS, ++G, ++AA)
+            mpo->ARAT[II]   = AA;
+            for (int* SS = AA; *SS; ++SS, ++AA)
             {
             }
+            ++AA;
+            G   = AA;
         }
+        mpo->RAT[RR][1]     = II;
     }
     return 1;
 }
 
-int morningBuildNullKernel(int NumRules, int** RAT, int nullTerminal, int* nullSet)
+int morningBuildNullKernel(MorningParseOpts mp)
 {
-    if (nullTerminal == 0)
+    MorningParseOptsT* mpo  = (MorningParseOptsT*)mp;
+    if (!mpo) return 0;
+    if (mpo->NullTerminal == 0)
     {
         return 1;
     }
-    for (int RR = 0; RR < NumRules; ++RR)
+    for (int RR = 0; RR < mpo->NumRules; ++RR)
     {
-        nullSet[RR] = 0;
+        mpo->NullSet[RR] = 0;
     }
     int anyNewSet   = 0;
     do
     {
         anyNewSet   = 0;
-        for (int RR = 0; RR < NumRules; ++RR)
+        for (int RR = 0; RR < mpo->NumRules; ++RR)
         {
-            int* Rule   = RAT[RR];
-            for (int* AA = Rule; *AA; ++AA)
+            for (int AA = mpo->RAT[RR][0]; AA < mpo->RAT[RR][1]; ++AA)
             {
                 int allNullTerminal = 1;
-                for (int* SS = AA; *SS; ++SS, ++AA)
+                for (int* SS = mpo->ARAT[AA]; *SS; ++SS)
                 {
-                    allNullTerminal &= ((*SS >= NumRules) && (*SS == nullTerminal)) || ((*SS < NumRules) && nullSet[*SS]);
+                    allNullTerminal &= ((*SS >= mpo->NumRules) && (*SS == mpo->NullTerminal)) || ((*SS < mpo->NumRules) && mpo->NullSet[*SS]);
                 }
                 if (allNullTerminal)
                 {
-                    anyNewSet   = !nullSet[RR];
-                    nullSet[RR] = 1;
+                    anyNewSet   = !mpo->NullSet[RR];
+                    mpo->NullSet[RR] = 1;
                 }
             }
         }
@@ -139,9 +268,28 @@ int morningBuildNullKernel(int NumRules, int** RAT, int nullTerminal, int* nullS
     return 1;
 }
 
-int morningParse(int NumRules, int** RAT, int nullTerminal, int* nullSet, void* cb, morningGetNextLex GetNextLex, morningSemanticAction Action, morningBadParse badParse)
+int morningParse(MorningParseOpts mp, void* cb)
 {
-    return 0;
+    MorningParseOptsT* mpo  = (MorningParseOptsT*)mp;
+
+    for (int AA = mpo->RAT[0][0]; AA < mpo->RAT[0][1]; ++AA)
+    {
+        if (mpo->AddItem(cb, 0, 0, AA - mpo->RAT[0][0], 0) < 0)
+        {
+            return 0; // Something went really wrong.
+        }
+    }
+
+    for (int index = 0, lex = 0; mpo->GetNextLex(cb, &lex); ++index, lex = 0)
+    {
+        // Prediction, Scanning, Completion.
+        // AddItem()
+        //  > 0 : success, new item added
+        //  = 0 : success, no item added
+        //  < 0 : something went wrong
+    }
+
+    return 1;
 }
 
 #ifdef __cplusplus
@@ -206,8 +354,15 @@ int test()
         END,
     };
 
-    int *RAT[PROD]      = { };
-    if (!morningBuildRandomAccessTable(&G[0], PROD, &RAT[0]))
+    unsigned char cmpo[morningParseOptsSize()];
+    MorningParseOpts mpo    = morningMakeParseOpts(&cmpo[0]);
+    morningAddGrammar(mpo, &G[0], PROD);
+
+    int RAT[PROD][2]        = { };
+    int* ARAT[4]            = { };
+    morningAddRandomAccessTable(mpo, RAT, ARAT);
+
+    if (!morningBuildRandomAccessTable(mpo))
     {
         return 1;
     }
@@ -218,7 +373,9 @@ int test()
     }
 
     int nullSet[PROD]   = { };
-    if (!morningBuildNullKernel(PROD, &RAT[0], END, &nullSet[0]))
+    morningAddNullKernel(mpo, END, &nullSet[0]);
+
+    if (!morningBuildNullKernel(mpo))
     {
         return 1;
     }
@@ -234,7 +391,12 @@ int test()
         .cursor = &lexemes[0],
         .end    = &lexemes[0] + sizeof(lexemes) / sizeof(lexemes[0]),
     };
-    if (!morningParse(PROD, &RAT[0], END, &nullSet[0], &gcb, gcbGetNextLex, 0, 0))
+
+    morningAddGetNextLex(mpo, gcbGetNextLex);
+    //morningAddSemanticActions(mpo, morningSemanticAction);
+    //morningAddBadParse(mpo, morningBadParse);
+
+    if (!morningParse(mpo, (void*)&gcb))
     {
         return 1;
     }
