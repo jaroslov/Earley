@@ -74,27 +74,98 @@ extern "C"
 
 */
 
-typedef int   (*morningGetNextLex)(void* cb, int* nextLex);
-typedef int   (*morningAddItem)(void* cb, int index, int rule, int alt, int pos);
-typedef void* (*morningSemanticAction)(void* cb, int rule, int subrule, void* previous);
-typedef int   (*morningBadParse)(void* cb, int rule, int subrule, int stop);
+#define MORNING_PSTATE_TABLE(X) \
+    X(ERROR)                    \
+    X(INIT)                     \
+    X(INIT_ITEMS)               \
+    X(SCANNING)                 \
+    X(COMPLETION)               \
+    X(PREDICTION)               \
+    X(LEX_NEXT)                 \
+    X(ANALYZE_ITEM)             \
+    X(GET_NEXT_ITEM)            \
+    X(GET_NEXT_PARENT_ITEM)     \
+    X(ADD_PARENT_ITEM)          \
+    X(NONE)
 
-typedef void* MorningParseOpts;
+typedef enum MORNING_PSTATE
+{
+#undef MORNING_ENTRY
+#define MORNING_ENTRY(E) MORNING_PS_ ## E,
+MORNING_PSTATE_TABLE(MORNING_ENTRY)
+#undef MORNING_ENTRY
+} MORNING_PSTATE;
 
-int morningParseOptsSize();
-MorningParseOpts morningMakeParseOpts(void* scratch);
+#define MORNING_EVENT_TABLE(X)  \
+    X(ERROR)                    \
+    X(GET_LEXEME)               \
+    X(ADD_ITEM)                 \
+    X(GET_NEXT_ITEM)            \
+    X(INIT_PARENT_LIST)         \
+    X(GET_NEXT_PARENT_ITEM)     \
+    X(NONE)
 
-int morningAddGrammar(MorningParseOpts, int* Grammar, int NumRules);
-int morningAddRandomAccessTable(MorningParseOpts, int (*RAT)[2], int** ARAT);
-int morningAddNullKernel(MorningParseOpts, int nullTerminal, int* nullSet);
-int morningAddGetNextLex(MorningParseOpts, morningGetNextLex);
-int morningAddAddItem(MorningParseOpts, morningAddItem);
-int morningAddSemanticActions(MorningParseOpts, morningSemanticAction);
-int morningAddBadParse(MorningParseOpts, morningBadParse);
+typedef enum MORNING_EVENT
+{
+#undef MORNING_ENTRY
+#define MORNING_ENTRY(E) MORNING_EVT_ ## E,
+MORNING_EVENT_TABLE(MORNING_ENTRY)
+#undef MORNING_ENTRY
+} MORNING_EVENT;
 
-int morningBuildRandomAccessTable(MorningParseOpts);
-int morningBuildNullKernel(MorningParseOpts);
-int morningParse(MorningParseOpts, void* cb);
+typedef struct MorningItem
+{
+    int                     Index;
+    int                     Rule;
+    int                     Alt;
+    int                     Dot;
+    int                     Source;
+} MorningItem;
+
+typedef struct MorningParseState
+{
+    int*                    Grammar;
+    int                     NumRules;
+    int                   (*RAT)[2];
+    int*                    ARAT;
+    int                     NullTerminal;
+    int*                    NullSet;
+
+    int                     StartRule;
+    int                     Index;
+    int                     LastToken;
+    MORNING_PSTATE          State;
+    MORNING_EVENT           Event;
+    MorningItem             WorkItem;
+    MorningItem            *NewItem;
+    int                     Lexeme;
+} MorningParseState;
+
+int morningInitParseState(MorningParseState*);
+
+int morningIsTerminal(MorningParseState*, int NTN);
+int morningIsNonterminal(MorningParseState*, int NTN);
+int morningIsNull(MorningParseState*, int NTN);
+int morningIsInNullKernel(MorningParseState*, int NTN);
+int morningSequenceLength(MorningParseState*, int AltStart);
+int morningRuleLength(MorningParseState*, int RuleStart);
+int morningEndOfGrammar(MorningParseState*, int RuleStart);
+int morningRuleBase(MorningParseState*, MorningItem*);
+int morningAltBase(MorningParseState*, MorningItem*);
+int morningGetNTN(MorningParseState*, MorningItem*);
+int morningNumAlternates(MorningParseState*, MorningItem*);
+
+int morningAddGrammar(MorningParseState*, int* Grammar, int NumRules);
+int morningAddRandomAccessTable(MorningParseState*, int (*RAT)[2], int* ARAT);
+int morningAddNullKernel(MorningParseState*, int nullTerminal, int* nullSet);
+int morningSetStartRule(MorningParseState*, int StartRule);
+
+int morningBuildRandomAccessTable(MorningParseState*);
+int morningBuildNullKernel(MorningParseState*);
+int morningParse(MorningParseState*, void* cb);
+
+int morningParseStep(MorningParseState* mps);
+int morningParentTrigger(MorningParseState* mps, MorningItem* item, int WhichRule);
 
 #ifdef __cplusplus
 } // extern "C"
@@ -113,154 +184,208 @@ extern "C"
 {
 #endif
 
-typedef struct MorningParseOptsT
+int morningAddGrammar(MorningParseState* mps, int* Grammar, int NumRules)
 {
-    int*                    Grammar;
-    int                     NumRules;
-    int                   (*RAT)[2];
-    int**                   ARAT;
-    int                     NullTerminal;
-    int*                    NullSet;
-    morningGetNextLex       GetNextLex;
-    morningAddItem          AddItem;
-    morningSemanticAction   SemanticAction;
-    morningBadParse         BadParse;
-} MorningParseOptsT;
-
-int morningParseOptsSize()
-{
-    return sizeof(MorningParseOptsT);
-}
-
-MorningParseOpts morningMakeParseOpts(void* scratch)
-{
-    for (int II = 0; II < sizeof(MorningParseOptsT); ++II)
-    {
-        ((unsigned char*)scratch)[II]   = 0;
-    }
-    return (MorningParseOpts)scratch;
-}
-
-int morningAddGrammar(MorningParseOpts mp, int* Grammar, int NumRules)
-{
-    MorningParseOptsT* mpo  = (MorningParseOptsT*)mp;
-    if (!mpo) return 0;
+    if (!mps) return 0;
     if (!Grammar) return 0;
     if (NumRules < 1) return 0;
-    mpo->Grammar    = Grammar;
-    mpo->NumRules   = NumRules;
+    mps->Grammar    = Grammar;
+    mps->NumRules   = NumRules;
     return 1;
 }
 
-int morningAddRandomAccessTable(MorningParseOpts mp, int (*RAT)[2], int** ARAT)
+int morningAddRandomAccessTable(MorningParseState* mps, int (*RAT)[2], int* ARAT)
 {
-    MorningParseOptsT* mpo  = (MorningParseOptsT*)mp;
-    if (!mpo) return 0;
+    if (!mps) return 0;
     if (!RAT) return 0;
-    mpo->RAT    = RAT;
-    mpo->ARAT   = ARAT;
+    mps->RAT    = RAT;
+    mps->ARAT   = ARAT;
     return 1;
 }
 
-int morningAddNullKernel(MorningParseOpts mp, int nullTerminal, int* nullSet)
+int morningAddNullKernel(MorningParseState* mps, int nullTerminal, int* nullSet)
 {
-    MorningParseOptsT* mpo  = (MorningParseOptsT*)mp;
-    if (!mpo) return 0;
+    if (!mps) return 0;
     if (!nullSet) return 0;
-    mpo->NullTerminal   = nullTerminal;
-    mpo->NullSet        = nullSet;
+    mps->NullTerminal   = nullTerminal;
+    mps->NullSet        = nullSet;
     return 1;
 }
 
-int morningAddGetNextLex(MorningParseOpts mp, morningGetNextLex GetNextLex)
+int morningSetStartRule(MorningParseState* mps, int StartRule)
 {
-    MorningParseOptsT* mpo  = (MorningParseOptsT*)mp;
-    if (!mpo) return 0;
-    if (!GetNextLex) return 0;
-    mpo->GetNextLex     = GetNextLex;
+    if (!mps) return 0;
+    if (!StartRule) return 0;
+    if (StartRule > mps->NumRules) return 0;
+    mps->StartRule  = StartRule;
     return 1;
 }
 
-int morningAddAddItem(MorningParseOpts mp, morningAddItem AddItem)
+int morningInitParseState(MorningParseState* mps)
 {
-    MorningParseOptsT* mpo  = (MorningParseOptsT*)mp;
-    if (!mpo) return 0;
-    if (!AddItem) return 0;
-    mpo->AddItem        = AddItem;
-    return 1;
-}
-
-int morningAddSemanticActions(MorningParseOpts mp, morningSemanticAction SemanticAction)
-{
-    MorningParseOptsT* mpo  = (MorningParseOptsT*)mp;
-    if (!mpo) return 0;
-    if (!SemanticAction) return 0;
-    mpo->SemanticAction = SemanticAction;
-    return 1;
-}
-
-int morningAddBadParse(MorningParseOpts mp, morningBadParse BadParse)
-{
-    MorningParseOptsT* mpo  = (MorningParseOptsT*)mp;
-    if (!mpo) return 0;
-    if (!BadParse) return 0;
-    mpo->BadParse       = BadParse;
-    return 1;
-}
-
-int morningBuildRandomAccessTable(MorningParseOpts mp)
-{
-    MorningParseOptsT* mpo  = (MorningParseOptsT*)mp;
-    if (!mpo) return 0;
-    if (!mpo->Grammar) return 0;
-    if (mpo->NumRules < 1) return 0;
-    int* G  = mpo->Grammar;
-    for (int RR = 0, II = 0; RR < mpo->NumRules; ++RR, ++G)
+    if (!mps) return 0;
+    for (int BB = 0; BB < sizeof(*mps); ++BB)
     {
-        mpo->RAT[RR][0]     = II;
-        for (int* AA = G; *AA; ++II)
+        ((unsigned char*)mps)[BB] = 0;
+    }
+    mps->State      = MORNING_PS_INIT;
+    return 1;
+}
+
+int morningIsTerminal(MorningParseState* mps, int NTN)
+{
+    if (!mps) return 0;
+    return NTN >= mps->NumRules;
+}
+
+int morningIsNonterminal(MorningParseState* mps, int NTN)
+{
+    if (!mps) return 0;
+    return NTN && (NTN < mps->NumRules);
+}
+
+int morningIsNull(MorningParseState* mps, int NTN)
+{
+    if (!mps) return 0;
+    return NTN && (NTN == mps->NullTerminal);
+}
+
+int morningIsInNullKernel(MorningParseState* mps, int NTN)
+{
+    if (!morningIsNonterminal(mps, NTN)) return 0;
+    if (!mps->NullSet) return 0;
+    return mps->NullSet[NTN];
+}
+
+int morningSequenceLength(MorningParseState* mps, int AltStart)
+{
+    if (!mps) return 0;
+    int AA  = AltStart;
+    while (mps->Grammar[AA])
+    {
+        ++AA;
+    }
+    return AA - AltStart;
+}
+
+int morningRuleLength(MorningParseState* mps, int RuleStart)
+{
+    if (!mps) return 0;
+    int SeqLen  = 0;
+    do
+    {
+        int AltLen  = morningSequenceLength(mps, RuleStart + SeqLen);
+        SeqLen      += AltLen + 1;
+    }
+    while (mps->Grammar[RuleStart + SeqLen]);
+    return SeqLen;
+}
+
+int morningEndOfGrammar(MorningParseState* mps, int RuleStart)
+{
+    if (!mps) return 0;
+    return !!!mps->Grammar[RuleStart];
+}
+
+int morningRuleBase(MorningParseState* mps, MorningItem* item)
+{
+    if (!mps) return 0;
+    if (!item) return 0;
+    if (item->Rule >= mps->NumRules) return 0;
+    int RuleBase        = mps->RAT[item->Rule][0];
+    int AltBase         = mps->ARAT[RuleBase + 0];
+    return AltBase;
+}
+
+int morningAltBase(MorningParseState* mps, MorningItem* item)
+{
+    if (!mps) return 0;
+    if (!item) return 0;
+    if (item->Rule >= mps->NumRules) return 0;
+    int RuleBase        = mps->RAT[item->Rule][0];
+    int NumAlts         = mps->RAT[item->Rule][1] - RuleBase;
+    if (item->Alt >= NumAlts) return 0;
+    int AltBase         = mps->ARAT[RuleBase + item->Alt];
+    return AltBase;
+}
+
+int morningGetNTN(MorningParseState* mps, MorningItem* item)
+{
+    if (!mps) return 0;
+    if (!item) return 0;
+    if (item->Rule >= mps->NumRules) return 0;
+    int RuleBase        = mps->RAT[item->Rule][0];
+    int NumAlts         = mps->RAT[item->Rule][1] - RuleBase;
+    if (item->Alt >= NumAlts) return 0;
+    int AltBase         = mps->ARAT[RuleBase + item->Alt];
+    // XXX: We can't check for shenanigans, here, sorry.
+    int NTN             = mps->Grammar[AltBase + item->Dot];
+    return NTN;
+}
+
+int morningNumAlternates(MorningParseState* mps, MorningItem* item)
+{
+    if (!mps) return 0;
+    if (!item) return 0;
+    if (item->Rule >= mps->NumRules) return 0;
+    return mps->RAT[item->Rule][1] - mps->RAT[item->Rule][0];
+}
+
+int morningBuildRandomAccessTable(MorningParseState* mps)
+{
+    if (!mps) return 0;
+    if (!mps->Grammar) return 0;
+    if (mps->NumRules < 1) return 0;
+    for (int RR = 1, PP = 0, AR = 0; RR <= mps->NumRules; ++RR)
+    {
+        mps->RAT[RR][0]     = AR;
+        fprintf(stdout, "RAT[%d][%d] = %d\n", RR, 0, AR);
+        for (int AA = PP; mps->Grammar[AA]; ++AR)
         {
-            mpo->ARAT[II]   = AA;
-            for (int* SS = AA; *SS; ++SS, ++AA)
+            mps->ARAT[AR]   = AA;
+            fprintf(stdout, "    ARAT[%d] = %d\n", AR, AA);
+            for (int SS = AA; mps->Grammar[SS]; ++SS, ++AA, ++PP)
             {
             }
             ++AA;
-            G   = AA;
+            ++PP;
         }
-        mpo->RAT[RR][1]     = II;
+        mps->RAT[RR][1]     = AR;
+        fprintf(stdout, "RAT[%d][%d] = %d\n", RR, 1, AR);
+        ++PP;
     }
     return 1;
 }
 
-int morningBuildNullKernel(MorningParseOpts mp)
+int morningBuildNullKernel(MorningParseState* mps)
 {
-    MorningParseOptsT* mpo  = (MorningParseOptsT*)mp;
-    if (!mpo) return 0;
-    if (mpo->NullTerminal == 0)
+    if (!mps) return 0;
+    if (mps->NullTerminal == 0)
     {
         return 1;
     }
-    for (int RR = 0; RR < mpo->NumRules; ++RR)
+    for (int RR = 0; RR < mps->NumRules; ++RR)
     {
-        mpo->NullSet[RR] = 0;
+        mps->NullSet[RR] = 0;
     }
     int anyNewSet   = 0;
     do
     {
         anyNewSet   = 0;
-        for (int RR = 0; RR < mpo->NumRules; ++RR)
+        for (int RR = 0; RR < mps->NumRules; ++RR)
         {
-            for (int AA = mpo->RAT[RR][0]; AA < mpo->RAT[RR][1]; ++AA)
+            for (int AA = mps->RAT[RR][0]; AA < mps->RAT[RR][1]; ++AA)
             {
                 int allNullTerminal = 1;
-                for (int* SS = mpo->ARAT[AA]; *SS; ++SS)
+                for (int SS = mps->ARAT[AA]; mps->Grammar[SS]; ++SS)
                 {
-                    allNullTerminal &= ((*SS >= mpo->NumRules) && (*SS == mpo->NullTerminal)) || ((*SS < mpo->NumRules) && mpo->NullSet[*SS]);
+                    int seq = mps->Grammar[SS];
+                    allNullTerminal &= ((seq >= mps->NumRules) && (seq == mps->NullTerminal)) || ((seq < mps->NumRules) && mps->NullSet[seq]);
                 }
                 if (allNullTerminal)
                 {
-                    anyNewSet   = !mpo->NullSet[RR];
-                    mpo->NullSet[RR] = 1;
+                    anyNewSet   = !mps->NullSet[RR];
+                    mps->NullSet[RR] = 1;
                 }
             }
         }
@@ -268,27 +393,207 @@ int morningBuildNullKernel(MorningParseOpts mp)
     return 1;
 }
 
-int morningParse(MorningParseOpts mp, void* cb)
+int morningParentTrigger(MorningParseState* mps, MorningItem* item, int WhichRule)
 {
-    MorningParseOptsT* mpo  = (MorningParseOptsT*)mp;
+    if (!mps) return 0;
+    if (!item) return 0;
+    if (WhichRule == 0) return 0;
+    if (WhichRule >= mps->NumRules) return 0;
 
-    for (int AA = mpo->RAT[0][0]; AA < mpo->RAT[0][1]; ++AA)
+    int RuleIndex       = mps->RAT[item->Rule][0];
+    int NumAlts         = mps->RAT[item->Rule][1] - RuleIndex;
+    if (item->Alt >= NumAlts)
     {
-        if (mpo->AddItem(cb, 0, 0, AA - mpo->RAT[0][0], 0) < 0)
+        return 0;
+    }
+    int AltIndex        = RuleIndex + item->Alt;
+    int TheRule         = mps->ARAT[AltIndex];
+    int NTN             = mps->Grammar[TheRule + item->Dot];
+    return NTN == WhichRule;
+}
+
+int morningParseStep(MorningParseState* mps)
+{
+    if (!mps) return -1;
+
+    mps->Event                  = MORNING_EVT_NONE;
+    int result                  = 0;
+
+    switch (mps->State)
+    {
+    case MORNING_PS_ERROR                   :
+        result                  = -1;
+        break;
+    case MORNING_PS_NONE                    :
+        result                  = 0;
+        break;
+    case MORNING_PS_INIT                    :
+        mps->State              = MORNING_PS_INIT_ITEMS;
+        mps->Event              = MORNING_EVT_ADD_ITEM;
+        mps->Index              = 0;
+        mps->WorkItem.Index     = 0;
+        mps->WorkItem.Rule      = mps->StartRule;
+        mps->WorkItem.Alt       = 0;
+        mps->WorkItem.Dot       = 0;
+        mps->WorkItem.Source    = 0;
+        result                  = mps->StartRule && (mps->StartRule <= mps->NumRules);
+        break;
+    case MORNING_PS_INIT_ITEMS              :
         {
-            return 0; // Something went really wrong.
+            int NumAlts         = morningNumAlternates(mps, &mps->WorkItem);
+            ++mps->WorkItem.Alt;
+            if (mps->WorkItem.Alt < NumAlts)
+            {
+                mps->Event      = MORNING_EVT_ADD_ITEM;
+            }
+            else
+            {
+                mps->State      = MORNING_PS_ANALYZE_ITEM;
+                mps->Event      = MORNING_EVT_GET_NEXT_ITEM;
+            }
+            result              = 1;
         }
+        break;
+    case MORNING_PS_LEX_NEXT                :
+        mps->State                      = MORNING_PS_ANALYZE_ITEM;
+        mps->Event                      = MORNING_EVT_GET_NEXT_ITEM;
+        result                          = 1;
+        break;
+    case MORNING_PS_SCANNING                :
+        //
+        // SCANNER. If [A -> ... * a .., j] is in S_i and a = x_i+1,
+        //          add [ A -> ... a * ..., j] to S_i+1
+        //
+        {
+            int NTN                     = morningGetNTN(mps, &mps->WorkItem);
+            if (NTN == mps->Lexeme)
+            {
+                mps->WorkItem.Dot       += 1;
+                mps->WorkItem.Index     = mps->Index + 1;
+                mps->State              = MORNING_PS_GET_NEXT_ITEM;
+                mps->Event              = MORNING_EVT_ADD_ITEM;
+                result                  = 1;
+            }
+            else
+            {
+                mps->State              = MORNING_PS_ANALYZE_ITEM;
+                mps->Event              = MORNING_EVT_GET_NEXT_ITEM;
+                result                  = 1;
+            }
+        }
+        break;
+    case MORNING_PS_COMPLETION              :
+        //
+        // COMPLETER. If [A -> ... *, j] is in S_i, add
+        //          [B -> ... A * ..., k] to S_i for all items
+        //          [B -> ... * A ..., k] in S_j
+        //
+        {
+            mps->State                  = MORNING_PS_GET_NEXT_PARENT_ITEM;
+            mps->Event                  = MORNING_EVT_GET_NEXT_PARENT_ITEM;
+            result                      = 1;
+        }
+        break;
+    case MORNING_PS_GET_NEXT_PARENT_ITEM    :
+        if (mps->NewItem)
+        {
+            mps->State                  = MORNING_PS_ADD_PARENT_ITEM;
+            mps->Event                  = MORNING_EVT_ADD_ITEM;
+            mps->WorkItem               = *mps->NewItem;
+            mps->WorkItem.Index         = mps->Index;
+            mps->WorkItem.Dot           += 1;
+            result                      = 1;
+        }
+        else
+        {
+            mps->State                  = MORNING_PS_ANALYZE_ITEM;
+            mps->Event                  = MORNING_EVT_GET_NEXT_ITEM;
+            result                      = 1;
+        }
+        break;
+    case MORNING_PS_ADD_PARENT_ITEM         :
+        mps->State                      = MORNING_PS_GET_NEXT_PARENT_ITEM;
+        mps->Event                      = MORNING_EVT_GET_NEXT_PARENT_ITEM;
+        result                          = 1;
+        break;
+    case MORNING_PS_PREDICTION              :
+        //
+        // PREDICTOR. If [A -> ... *  B ..., j] is in S_i, add
+        //          [B -> * C ..., i] to S_i for all rules B -> C
+        //
+        {
+            int NumAlts                 = morningNumAlternates(mps, &mps->WorkItem);
+            ++mps->WorkItem.Alt;
+            if (mps->WorkItem.Alt < NumAlts)
+            {
+                mps->Event              = MORNING_EVT_ADD_ITEM;
+            }
+            else
+            {
+                mps->State              = MORNING_PS_ANALYZE_ITEM;
+                mps->Event              = MORNING_EVT_GET_NEXT_ITEM;
+            }
+            result                      = 1;
+        }
+        break;
+    case MORNING_PS_GET_NEXT_ITEM           :
+        mps->State                      = MORNING_PS_ANALYZE_ITEM;
+        mps->Event                      = MORNING_EVT_GET_NEXT_ITEM;
+        result                          = 1;
+        break;
+    case MORNING_PS_ANALYZE_ITEM            :
+        if (mps->NewItem)
+        {
+            mps->WorkItem               = *mps->NewItem;
+            int NTN                     = morningGetNTN(mps, &mps->WorkItem);
+            if (NTN == 0)
+            {
+                mps->State              = MORNING_PS_COMPLETION;
+                mps->Event              = MORNING_EVT_INIT_PARENT_LIST;
+                result                  = 1;
+            }
+            else if (NTN <= mps->NumRules)
+            {
+                mps->State              = MORNING_PS_PREDICTION;
+                mps->Event              = MORNING_EVT_ADD_ITEM;
+                mps->WorkItem.Index     = mps->Index;
+                mps->WorkItem.Rule      = NTN;
+                mps->WorkItem.Alt       = 0;
+                mps->WorkItem.Dot       = 0;
+                mps->WorkItem.Source    = mps->Index;
+                result                  = 1;
+            }
+            else
+            {
+                mps->State              = MORNING_PS_SCANNING;
+                mps->Event              = MORNING_EVT_GET_LEXEME;
+                result                  = 1;
+            }
+        }
+        else
+        {
+            if (mps->Lexeme)
+            {
+                mps->Index              += 1;
+                mps->State              = MORNING_PS_LEX_NEXT;
+                mps->Event              = MORNING_EVT_GET_LEXEME;
+                result                  = 1;
+            }
+            else
+            {
+                result                  = 0;
+            }
+        }
+        break;
     }
 
-    for (int index = 0, lex = 0; mpo->GetNextLex(cb, &lex); ++index, lex = 0)
-    {
-        // Prediction, Scanning, Completion.
-        // AddItem()
-        //  > 0 : success, new item added
-        //  = 0 : success, no item added
-        //  < 0 : something went wrong
-    }
+    mps->NewItem                = 0;
 
+    return result;
+}
+
+int morningParse(MorningParseState* mps, void* cb)
+{
     return 1;
 }
 
@@ -302,6 +607,11 @@ int morningParse(MorningParseOpts mp, void* cb)
 
 #include <stdio.h>
 
+#include <algorithm>
+#include <list>
+#include <map>
+#include <set>
+
 int test();
 
 int main(int argc, char *argv[])
@@ -309,60 +619,101 @@ int main(int argc, char *argv[])
     return test();
 }
 
+bool operator< (MorningItem const& left, MorningItem const& right)
+{
+    int L[5] = { left.Index,  left.Rule,  left.Alt,  left.Dot,  left.Source  };
+    int R[5] = { right.Index, right.Rule, right.Alt, right.Dot, right.Source };
+    return std::lexicographical_compare(&L[0], &L[0] + sizeof(L)/sizeof(L[0]),
+                                        &R[0], &R[0] + sizeof(R)/sizeof(R[0]));
+}
+
 typedef struct Gcb
 {
-    int*    begin;
-    int*    cursor;
-    int*    end;
+    std::map<int, std::set<MorningItem>>    items;
+    std::map<int, std::set<MorningItem>>    unused;
+    std::list<const MorningItem*>           parents;
 } Gcb;
 
-int gcbGetNextLex(void* cb, int* nextLex)
+#define G_TABLE(X)  \
+    X(END)          \
+    X(SUM)          \
+    X(PROD)         \
+    X(FAC)          \
+    X(NUM)          \
+    X(LRULE)        \
+    X(PLUS)         \
+    X(MUL)          \
+    X(DIG)          \
+    X(LPAR)         \
+    X(RPAR)         \
+    X(MAX)
+
+enum
 {
-    if (!cb) return 0;
-    Gcb& gcb    = *(Gcb*)cb;
+#undef G_TABLE_X
+#define G_TABLE_X(ENUM) ENUM,
+    G_TABLE(G_TABLE_X)
+#undef G_TABLE_X
+};
+const char* GS[]    =
+{
+#undef G_TABLE_X
+#define G_TABLE_X(ENUM) #ENUM,
+    G_TABLE(G_TABLE_X)
+#undef G_TABLE_X
+};
 
-    if (gcb.begin > gcb.cursor)
+void printItem(MorningParseState* mps, MorningItem* item)
+{
+    fprintf(stdout, "[%8d] %6s ::=", item->Index, GS[item->Rule]);
+    int AltStart    = morningAltBase(mps, item);
+    int AltLen      = morningSequenceLength(mps, AltStart);
+    int prLen       = 0;
+    for (int DD = 0; DD < AltLen; ++DD)
     {
-        return 0;
+        prLen       += fprintf(stdout, " %s%-6s", (item->Dot == DD) ? "*" : " ", GS[mps->Grammar[AltStart + DD]]);
     }
-
-    if (gcb.cursor >= gcb.end)
-    {
-        return 0;
-    }
-
-    *nextLex    = *gcb.cursor;
-    ++gcb.cursor;
-
-    return 1;
+    prLen           += fprintf(stdout, "%s", (item->Dot == AltLen) ? "*" : " ");
+    fprintf(stdout, "%*.*s (%d)", (28 - prLen), (28 - prLen), "", item->Source);
+    //fprintf(stdout, " : %d%d%d%d%d", item->Index, item->Rule, item->Alt, item->Dot, item->Source);
+    fprintf(stdout, "%s", "\n");
 }
 
 int test()
 {
-    enum { END, SUM, PROD, PLUS, MUL, NUM };
-
     int G[] =
     {
         /*  SUM ::= */ SUM, PLUS, PROD, END,
         /*       |  */ PROD, END,
         END,
 
-        /* PROD ::= */ PROD, MUL, NUM, END,
+        /* PROD ::= */ PROD, MUL, FAC, END,
+        /*       |  */ FAC, END,
+        END,
+
+        /*  FAC ::= */ LPAR, SUM, RPAR, END,
         /*       |  */ NUM, END,
         END,
+
+        /*  NUM ::= */ DIG, NUM, END,
+        /*       |  */ DIG, END,
 
         END,
     };
 
-    unsigned char cmpo[morningParseOptsSize()];
-    MorningParseOpts mpo    = morningMakeParseOpts(&cmpo[0]);
-    morningAddGrammar(mpo, &G[0], PROD);
+    #define NUM_RULES       (LRULE)
+    #define NUM_PRODS       (8)
 
-    int RAT[PROD][2]        = { };
-    int* ARAT[4]            = { };
-    morningAddRandomAccessTable(mpo, RAT, ARAT);
+    MorningParseState mps   = { };
+    morningInitParseState(&mps);
 
-    if (!morningBuildRandomAccessTable(mpo))
+    morningAddGrammar(&mps, &G[0], NUM_RULES);
+
+    int RAT[NUM_RULES][2]   = { };
+    int ARAT[NUM_PRODS]     = { };
+    morningAddRandomAccessTable(&mps, RAT, ARAT);
+
+    if (!morningBuildRandomAccessTable(&mps))
     {
         return 1;
     }
@@ -372,33 +723,154 @@ int test()
         fprintf(stdout, "%d == %d\n", *RAT[RR], RR+1);
     }
 
-    int nullSet[PROD]   = { };
-    morningAddNullKernel(mpo, END, &nullSet[0]);
+    int nullSet[NUM_RULES]  = { };
+    morningAddNullKernel(&mps, END, &nullSet[0]);
 
-    if (!morningBuildNullKernel(mpo))
+    if (!morningBuildNullKernel(&mps))
     {
         return 1;
     }
-    for (int RR = 0; RR < PROD; ++RR)
+
+    morningSetStartRule(&mps, SUM);
+
+    for (int GG = 0; GG < MAX; ++GG)
     {
-        fprintf(stdout, "%d%s\n", (RR+1), nullSet[RR] ? " is null." : " is not null.");
+        fprintf(stdout, "%8s : is terminal?    %d\n", GS[GG], morningIsTerminal(&mps, GG));
+        fprintf(stdout, "%8s : is nonterminal? %d\n", GS[GG], morningIsNonterminal(&mps, GG));
+        fprintf(stdout, "%8s : is null?        %d\n", GS[GG], morningIsInNullKernel(&mps, GG));
     }
 
-    int lexemes[]   = { NUM };
+    fprintf(stdout, "LEN R0A0: %d\n", morningSequenceLength(&mps, 0));
+    int RuleStart   = 0;
+    while (!morningEndOfGrammar(&mps, RuleStart))
+    {
+        int Len     = morningRuleLength(&mps, RuleStart);
+        if (!Len) break;
+        fprintf(stdout, "LEN %d\n", Len);
+        RuleStart   += Len + 1;
+    }
+
+    MorningItem item    = { 0, 1, 0, 0, 0 };
+    printItem(&mps, &item);
+    fprintf(stdout, "What? %s\n", GS[morningGetNTN(&mps, &item)]);
+    item.Alt            = 1;
+    printItem(&mps, &item);
+    fprintf(stdout, "What? %s\n", GS[morningGetNTN(&mps, &item)]);
+    item.Rule           = 1;
+    item.Alt            = 0;
+    printItem(&mps, &item);
+    fprintf(stdout, "What? %s\n", GS[morningGetNTN(&mps, &item)]);
+    item.Alt            = 1;
+    printItem(&mps, &item);
+    fprintf(stdout, "What? %s\n", GS[morningGetNTN(&mps, &item)]);
+
+    int lexemes[]   = { DIG, PLUS, LPAR, DIG, MUL, DIG, PLUS, DIG, RPAR, END };
     Gcb gcb =
     {
-        .begin  = &lexemes[0],
-        .cursor = &lexemes[0],
-        .end    = &lexemes[0] + sizeof(lexemes) / sizeof(lexemes[0]),
     };
 
-    morningAddGetNextLex(mpo, gcbGetNextLex);
-    //morningAddSemanticActions(mpo, morningSemanticAction);
-    //morningAddBadParse(mpo, morningBadParse);
-
-    if (!morningParse(mpo, (void*)&gcb))
+    #undef MORNING_ENTRY
+    #define MORNING_ENTRY(X) # X,
+    static const char* STATES[] =
     {
-        return 1;
+        MORNING_PSTATE_TABLE(MORNING_ENTRY)
+    };
+    #undef MORNING_ENTRY
+    #undef MORNING_ACTION
+    #define MORNING_ACTION(X) # X,
+    static const char* EVENTS[] =
+    {
+        MORNING_EVENT_TABLE(MORNING_ACTION)
+    };
+    #undef MORNING_ACTION
+
+    MorningItem NewItem                         = { };
+    while (1)
+    {
+        int result  = morningParseStep(&mps);
+        if (result != 1)
+        {
+            break;
+        }
+        fprintf(stdout, "[%4d] STATE: %s x %s\n", mps.Index, STATES[mps.State], EVENTS[mps.Event]);
+        switch (mps.Event)
+        {
+        case MORNING_EVT_ERROR                  :
+            break;
+        case MORNING_EVT_GET_LEXEME             :
+            fprintf(stdout, "       --> %s.\n", "GET LEXEME");
+            mps.Lexeme              = lexemes[mps.Index];
+            break;
+        case MORNING_EVT_ADD_ITEM               :
+            {
+                auto iitr       = gcb.items[mps.WorkItem.Index].find(mps.WorkItem);
+                if (iitr != gcb.items[mps.WorkItem.Index].end())
+                {
+                    break;
+                }
+                fprintf(stdout, "       --> ITEM ADDED to idx %d.\n", mps.WorkItem.Index);
+                fprintf(stdout, "%s", "           "); printItem(&mps, &mps.WorkItem);
+                gcb.items[mps.WorkItem.Index].insert(mps.WorkItem);
+                gcb.unused[mps.WorkItem.Index].insert(mps.WorkItem);
+            }
+            break;
+        case MORNING_EVT_GET_NEXT_ITEM          :
+            {
+                fprintf(stdout, "       NUM ITEMS LEFT: %d\n", (int)gcb.unused[mps.Index].size());
+                if (gcb.unused[mps.Index].empty())
+                {
+                    break;
+                }
+                fprintf(stdout, "       --> %s.\n", "ITEM GOTTEN");
+                NewItem                 = *gcb.unused[mps.Index].begin();
+                gcb.unused[mps.Index].erase(gcb.unused[mps.Index].begin());
+                mps.NewItem             = &NewItem;
+                fprintf(stdout, "%s", "           "); printItem(&mps, mps.NewItem);
+            }
+            break;
+        case MORNING_EVT_INIT_PARENT_LIST       :
+            gcb.parents.clear();
+            fprintf(stdout, "       --> %s.\n", "INIT'D PARENT LIST");
+            {
+                for (auto& item : gcb.items[mps.WorkItem.Source])
+                {
+                    fprintf(stdout, "%s", "       FILTERING:\n       ");
+                    printItem(&mps, (MorningItem*)&item);
+                    if (morningParentTrigger(&mps, (MorningItem*)&item, mps.WorkItem.Rule))
+                    {
+                        fprintf(stdout, "%s", "       ADDING.\n");
+                        gcb.parents.push_back(&item);
+                    }
+                }
+            }
+            break;
+        case MORNING_EVT_GET_NEXT_PARENT_ITEM   :
+            if (!gcb.parents.empty())
+            {
+                mps.NewItem        = (MorningItem*)gcb.parents.front();
+                gcb.parents.pop_front();
+            }
+            break;
+        case MORNING_EVT_NONE                   :
+            break;
+        }
+    }
+
+    fprintf(stdout, "%s", "\n");
+    int Index = 0;
+    for (auto& items : gcb.items)
+    {
+        int len     = snprintf(0, 0, "%d", Index);
+        int rem     = 8 - len;
+        int pos     = rem / 2;
+        int pre     = rem - pos;
+        fprintf(stdout, "===%*.*s%d%*.*s===\n", pre, pre, "", Index, pos, pos, "");
+        for (auto& item : items.second)
+        {
+            printItem(&mps, (MorningItem*)&item);
+        }
+        fprintf(stdout, "%s", "\n");
+        ++Index;
     }
 
     return 0;
