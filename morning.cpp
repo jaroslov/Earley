@@ -153,7 +153,7 @@ int* morningGetGrammar(MorningParseState*);
 int morningGetIndex(MorningParseState*);
 MORNING_PSTATE morningGetState(MorningParseState*);
 MORNING_EVENT morningGetEvent(MorningParseState*);
-int morningGetWorkItem(MorningParseState*, MorningItem* WorkItem);
+int morningGetWorkItem(MorningParseState*, MorningItem** WorkItem);
 
 int morningBuildRandomAccessTable(MorningParseState*);
 int morningBuildNullKernel(MorningParseState*);
@@ -359,7 +359,7 @@ int test()
             break;
         }
         fprintf(stdout, "[%4d] STATE: %s x %s\n", morningGetIndex(mps), STATES[morningGetState(mps)], EVENTS[morningGetEvent(mps)]);
-        MorningItem WorkItem                    = { };
+        MorningItem *WorkItem                   = { };
         morningGetWorkItem(mps, &WorkItem);
         switch (morningGetEvent(mps))
         {
@@ -371,16 +371,16 @@ int test()
             break;
         case MORNING_EVT_ADD_ITEM               :
             {
-                auto iitr       = gcb.items[WorkItem.Index].find(WorkItem);
-                if (iitr != gcb.items[WorkItem.Index].end())
+                auto iitr       = gcb.items[WorkItem->Index].find(*WorkItem);
+                if (iitr != gcb.items[WorkItem->Index].end())
                 {
                     break;
                 }
-                fprintf(stdout, "       --> ITEM ADDED to idx %d.\n", WorkItem.Index);
+                fprintf(stdout, "       --> ITEM ADDED to idx %d.\n", WorkItem->Index);
                 fprintf(stdout, "%s", "           ");
-                printItem(mps, &WorkItem);
-                gcb.items[WorkItem.Index].insert(WorkItem);
-                gcb.unused[WorkItem.Index].insert(WorkItem);
+                printItem(mps, WorkItem);
+                gcb.items[WorkItem->Index].insert(*WorkItem);
+                gcb.unused[WorkItem->Index].insert(*WorkItem);
             }
             break;
         case MORNING_EVT_GET_NEXT_ITEM          :
@@ -402,11 +402,11 @@ int test()
             gcb.parents.clear();
             fprintf(stdout, "       --> %s.\n", "INIT'D PARENT LIST");
             {
-                for (auto& item : gcb.items[WorkItem.Source])
+                for (auto& item : gcb.items[WorkItem->Source])
                 {
                     fprintf(stdout, "%s", "       FILTERING:\n       ");
                     printItem(mps, (MorningItem*)&item);
-                    if (morningParentTrigger(mps, (MorningItem*)&item, WorkItem.Rule))
+                    if (morningParentTrigger(mps, (MorningItem*)&item, WorkItem->Rule))
                     {
                         fprintf(stdout, "%s", "       ADDING.\n");
                         gcb.parents.push_back(&item);
@@ -553,11 +553,11 @@ MORNING_EVENT morningGetEvent(MorningParseState* mps)
     return mps->Event;
 }
 
-int morningGetWorkItem(MorningParseState* mps, MorningItem* WorkItem)
+int morningGetWorkItem(MorningParseState* mps, MorningItem** WorkItem)
 {
     if (!mps) return 0;
     if (!WorkItem) return 0;
-    *WorkItem   = mps->WorkItem;
+    *WorkItem   = &mps->WorkItem;
     return 1;
 }
 
