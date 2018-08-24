@@ -116,6 +116,8 @@ MORNING_EVENT_TABLE(MORNING_ENTRY)
 #undef MORNING_ENTRY
 } MORNING_EVENT;
 
+typedef struct MorningParseState MorningParseState;
+
 typedef struct MorningItem
 {
     int                     Index;
@@ -125,7 +127,17 @@ typedef struct MorningItem
     int                     Source;
 } MorningItem;
 
-typedef struct MorningParseState MorningParseState;
+typedef int (*MorningAction)    (void*, MorningParseState*);
+
+typedef struct MorningActions
+{
+    void           *Handle;
+    MorningAction   GetLexeme;
+    MorningAction   AddItem;
+    MorningAction   GetNextItem;
+    MorningAction   InitParentList;
+    MorningAction   GetNextParentItem;
+} MorningActions;
 
 int morningParseStateSize();
 int morningInitParseState(MorningParseState*);
@@ -154,13 +166,14 @@ int morningGetIndex(MorningParseState*);
 MORNING_PSTATE morningGetState(MorningParseState*);
 MORNING_EVENT morningGetEvent(MorningParseState*);
 int morningGetWorkItem(MorningParseState*, MorningItem** WorkItem);
+int morningParentTrigger(MorningParseState* mps, MorningItem* item, int WhichRule);
 
 int morningBuildRandomAccessTable(MorningParseState*);
 int morningBuildNullKernel(MorningParseState*);
-int morningParse(MorningParseState*, void* cb);
 
 int morningParseStep(MorningParseState* mps);
-int morningParentTrigger(MorningParseState* mps, MorningItem* item, int WhichRule);
+int morningParseStepAct(MorningParseState* mps, MorningActions* mact);
+int morningParse(MorningParseState*, MorningActions* mact);
 
 #ifdef __cplusplus
 } // extern "C"
@@ -937,8 +950,36 @@ int morningParseStep(MorningParseState* mps)
     return result;
 }
 
-int morningParse(MorningParseState* mps, void* cb)
+int morningParseStepAct(MorningParseState* mps, MorningActions* mact)
 {
+    if (!morningParseStep(mps))
+    {
+        return 0;
+    }
+    switch (mps->Event)
+    {
+    case MORNING_EVT_ERROR                  : return -1;
+    case MORNING_EVT_GET_LEXEME             : return mact->GetLexeme(mact->Handle, mps);
+    case MORNING_EVT_ADD_ITEM               : return mact->AddItem(mact->Handle, mps);
+    case MORNING_EVT_GET_NEXT_ITEM          : return mact->GetNextItem(mact->Handle, mps);
+    case MORNING_EVT_INIT_PARENT_LIST       : return mact->InitParentList(mact->Handle, mps);
+    case MORNING_EVT_GET_NEXT_PARENT_ITEM   : return mact->GetNextParentItem(mact->Handle, mps);
+    case MORNING_EVT_NONE                   : return 0;
+    }
+    return -1;
+}
+
+int morningParse(MorningParseState* mps, MorningActions* mact)
+{
+    if (!mps) return -1;
+    if (!mact) return -1;
+    do
+    {
+        int result  = morningParseStepAct(mps, mact);
+        if (result < 0) return -1;
+        if (result == 0) break;
+    }
+    while (1);
     return 1;
 }
 
