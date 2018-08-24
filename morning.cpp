@@ -171,9 +171,9 @@ int morningParentTrigger(MorningParseState* mps, MorningItem* item, int WhichRul
 int morningBuildRandomAccessTable(MorningParseState*);
 int morningBuildNullKernel(MorningParseState*);
 
-int morningParseStep(MorningParseState* mps);
-int morningParseStepAct(MorningParseState* mps, MorningActions* mact);
-int morningParse(MorningParseState*, MorningActions* mact);
+int morningRecognizerStep(MorningParseState* mps);
+int morningRecognizerStepAct(MorningParseState* mps, MorningActions* mact);
+int morningRecognize(MorningParseState*, MorningActions* mact);
 
 #ifdef __cplusplus
 } // extern "C"
@@ -366,7 +366,7 @@ int test()
     MorningItem NewItem                         = { };
     while (1)
     {
-        int result  = morningParseStep(mps);
+        int result  = morningRecognizerStep(mps);
         if (result != 1)
         {
             break;
@@ -770,7 +770,7 @@ int morningParentTrigger(MorningParseState* mps, MorningItem* item, int WhichRul
     return NTN == WhichRule;
 }
 
-int morningParseStep(MorningParseState* mps)
+int morningRecognizerStep(MorningParseState* mps)
 {
     if (!mps) return -1;
 
@@ -950,9 +950,9 @@ int morningParseStep(MorningParseState* mps)
     return result;
 }
 
-int morningParseStepAct(MorningParseState* mps, MorningActions* mact)
+int morningRecognizerStepAct(MorningParseState* mps, MorningActions* mact)
 {
-    if (!morningParseStep(mps))
+    if (!morningRecognizerStep(mps))
     {
         return 0;
     }
@@ -969,13 +969,13 @@ int morningParseStepAct(MorningParseState* mps, MorningActions* mact)
     return -1;
 }
 
-int morningParse(MorningParseState* mps, MorningActions* mact)
+int morningRecognize(MorningParseState* mps, MorningActions* mact)
 {
     if (!mps) return -1;
     if (!mact) return -1;
     do
     {
-        int result  = morningParseStepAct(mps, mact);
+        int result  = morningRecognizerStepAct(mps, mact);
         if (result < 0) return -1;
         if (result == 0) break;
     }
