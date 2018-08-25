@@ -31,5 +31,5 @@ $(BINi)/morning				: morning.cpp
 
 define MAKE_MORNING_TEST
 	@if [ ! -d $(BINi) ]; then mkdir -p $(BINi); fi;
-	$(CXX) $(CXXFLAGSi) -DMORNING_CPP_IMPL -DMORNING_TESTING morning.cpp -o $(BINi)/morning
+	$(CXX) $(CXXFLAGSi) morning.cpp -o $(BINi)/morning
 endef
