@@ -117,6 +117,19 @@ MORNING_EVENT_TABLE(MORNING_ENTRY)
 #undef MORNING_ENTRY
 } MORNING_EVENT;
 
+#define MORNING_ACTION_TABLE(X) \
+    X(ERROR)                    \
+    X(PARSE)                    \
+    X(NONE)
+
+typedef enum MORNING_ACTION
+{
+#undef MORNING_ENTRY
+#define MORNING_ENTRY(E) MORNING_ACT_ ## E,
+MORNING_ACTION_TABLE(MORNING_ENTRY)
+#undef MORNING_ENTRY
+} MORNING_ACTION;
+
 typedef struct MorningParseState MorningParseState;
 
 typedef struct MorningItem
@@ -166,6 +179,7 @@ int* morningGetGrammar(MorningParseState*);
 int morningGetIndex(MorningParseState*);
 MORNING_PSTATE morningGetState(MorningParseState*);
 MORNING_EVENT morningGetEvent(MorningParseState*);
+MORNING_ACTION morningGetAction(MorningParseState*);
 int morningGetWorkItem(MorningParseState*, MorningItem** WorkItem);
 int morningParentTrigger(MorningParseState* mps, MorningItem* item, int WhichRule);
 
@@ -189,6 +203,31 @@ extern "C"
 {
 #endif
 
+/*
+
+    We parse 'on the fly'. The general idea is that as we complete
+    (or match a token) we define a Parse-action for that event, i.e.,
+
+        Action(MorningItem, Index, ...)
+
+    This kind of needs to be causal. So, we need the Action event
+    to return an 'AST' handle.
+
+        Action(MorningItem, Index, ASTHandle)
+
+    Which says who caused us. Unfortunately, our current abstract
+    data structure 'loses' this information. We can recover it, but
+    it requires us to walk the items. There's two ways to solve this
+    issue:
+
+        1. Suck it up, and walk the items; or,
+        2. Add a 'registration' to AddItem() such that we write
+            down *who* caused us to add an item. We're really only
+            interested in two 'who's: Scan and Complete. Predict
+            isn't interesting.
+
+*/
+
 typedef struct MorningParseState
 {
     int*                    Grammar;
@@ -203,6 +242,7 @@ typedef struct MorningParseState
     int                     LastToken;
     MORNING_PSTATE          State;
     MORNING_EVENT           Event;
+    MORNING_ACTION          Action;
     MorningItem             WorkItem;
     MorningItem            *NewItem;
     int                     Lexeme;
@@ -281,6 +321,12 @@ MORNING_EVENT morningGetEvent(MorningParseState* mps)
 {
     if (!mps) return MORNING_EVT_ERROR;
     return mps->Event;
+}
+
+MORNING_ACTION morningGetAction(MorningParseState* mps)
+{
+    if (!mps) return MORNING_ACT_PARSE;
+    return mps->Action;
 }
 
 int morningGetWorkItem(MorningParseState* mps, MorningItem** WorkItem)
@@ -492,6 +538,7 @@ int morningRecognizerStep(MorningParseState* mps)
     if (!mps) return -1;
 
     mps->Event                  = MORNING_EVT_NONE;
+    mps->Action                 = MORNING_ACT_NONE;
     int result                  = 0;
 
     switch (mps->State)
@@ -642,6 +689,7 @@ int morningRecognizerStep(MorningParseState* mps)
             {
                 mps->State              = MORNING_PS_COMPLETION;
                 mps->Event              = MORNING_EVT_INIT_PARENT_LIST;
+                mps->Action             = MORNING_ACT_PARSE;
                 result                  = 1;
             }
             else if (NTN <= mps->NumRules)
@@ -672,6 +720,7 @@ int morningRecognizerStep(MorningParseState* mps)
             {
                 mps->State              = MORNING_PS_SCANNING;
                 mps->Event              = MORNING_EVT_GET_LEXEME;
+                mps->Action             = MORNING_ACT_PARSE;
                 result                  = 1;
             }
         }
