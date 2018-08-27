@@ -26,7 +26,7 @@ all			: $(BINi)/morning
 clean		:
 	rm -rf $(BINi)
 
-$(BINi)/morning				: morning.cpp
+$(BINi)/morning				: morning.cpp morning.h
 	$(call MAKE_MORNING_TEST)
 
 define MAKE_MORNING_TEST
