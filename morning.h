@@ -179,7 +179,6 @@ int* morningGetGrammar(MorningRecogState*);
 int morningGetIndex(MorningRecogState*);
 MORNING_PSTATE morningGetState(MorningRecogState*);
 MORNING_EVENT morningGetEvent(MorningRecogState*);
-MORNING_ACTION morningGetAction(MorningRecogState*);
 int morningGetWorkItem(MorningRecogState*, MorningItem** WorkItem);
 int morningParentTrigger(MorningRecogState* mps, MorningItem* item, int WhichRule);
 
@@ -242,7 +241,6 @@ typedef struct MorningRecogState
     int                     LastToken;
     MORNING_PSTATE          State;
     MORNING_EVENT           Event;
-    MORNING_ACTION          Action;
     MorningItem             WorkItem;
     MorningItem            *NewItem;
     int                     Lexeme;
@@ -321,12 +319,6 @@ MORNING_EVENT morningGetEvent(MorningRecogState* mps)
 {
     if (!mps) return MORNING_EVT_ERROR;
     return mps->Event;
-}
-
-MORNING_ACTION morningGetAction(MorningRecogState* mps)
-{
-    if (!mps) return MORNING_ACT_PARSE;
-    return mps->Action;
 }
 
 int morningGetWorkItem(MorningRecogState* mps, MorningItem** WorkItem)
@@ -538,7 +530,6 @@ int morningRecognizerStep(MorningRecogState* mps)
     if (!mps) return -1;
 
     mps->Event                  = MORNING_EVT_NONE;
-    mps->Action                 = MORNING_ACT_NONE;
     int result                  = 0;
 
     switch (mps->State)
@@ -689,7 +680,6 @@ int morningRecognizerStep(MorningRecogState* mps)
             {
                 mps->State              = MORNING_PS_COMPLETION;
                 mps->Event              = MORNING_EVT_INIT_PARENT_LIST;
-                mps->Action             = MORNING_ACT_PARSE;
                 result                  = 1;
             }
             else if (NTN <= mps->NumRules)
@@ -720,7 +710,6 @@ int morningRecognizerStep(MorningRecogState* mps)
             {
                 mps->State              = MORNING_PS_SCANNING;
                 mps->Event              = MORNING_EVT_GET_LEXEME;
-                mps->Action             = MORNING_ACT_PARSE;
                 result                  = 1;
             }
         }
