@@ -58,15 +58,15 @@ const char* GS[]    =
 #undef G_TABLE_X
 };
 
-void printItem(int Index, MorningRecogState* mps, MorningItem* item)
+void printItem(int Index, MorningRecogState* mrs, MorningItem* item)
 {
     fprintf(stdout, "[%8d] %6s ::=", Index, GS[item->Rule]);
-    int AltStart    = morningAltBase(mps, item);
-    int AltLen      = morningSequenceLength(mps, AltStart);
+    int AltStart    = morningAltBase(mrs, item);
+    int AltLen      = morningSequenceLength(mrs, AltStart);
     int prLen       = 0;
     for (int DD = 0; DD < AltLen; ++DD)
     {
-        prLen       += fprintf(stdout, " %s%-6s", (item->Dot == DD) ? "*" : " ", GS[morningGetGrammar(mps)[AltStart + DD]]);
+        prLen       += fprintf(stdout, " %s%-6s", (item->Dot == DD) ? "*" : " ", GS[morningGetGrammar(mrs)[AltStart + DD]]);
     }
     prLen           += fprintf(stdout, "%s", (item->Dot == AltLen) ? "*" : " ");
     fprintf(stdout, "%*.*s (%d)", (28 - prLen), (28 - prLen), "", item->Source);
@@ -100,16 +100,16 @@ int test()
     #define NUM_PRODS       (8)
 
     unsigned char mpStore[morningRecogStateSize()];
-    MorningRecogState* mps  = (MorningRecogState*)&mpStore[0];
-    morningInitRecogState(mps);
+    MorningRecogState* mrs  = (MorningRecogState*)&mpStore[0];
+    morningInitRecogState(mrs);
 
-    morningAddGrammar(mps, &G[0], NUM_RULES);
+    morningAddGrammar(mrs, &G[0], NUM_RULES);
 
     int RAT[NUM_RULES][2]   = { };
     int ARAT[NUM_PRODS]     = { };
-    morningAddRandomAccessTable(mps, RAT, ARAT);
+    morningAddRandomAccessTable(mrs, RAT, ARAT);
 
-    if (!morningBuildRandomAccessTable(mps))
+    if (!morningBuildRandomAccessTable(mrs))
     {
         return 1;
     }
@@ -120,45 +120,45 @@ int test()
     }
 
     int nullSet[NUM_RULES]  = { };
-    morningAddNullKernel(mps, END, &nullSet[0]);
+    morningAddNullKernel(mrs, END, &nullSet[0]);
 
-    if (!morningBuildNullKernel(mps))
+    if (!morningBuildNullKernel(mrs))
     {
         return 1;
     }
 
-    morningSetStartRule(mps, SUM);
+    morningSetStartRule(mrs, SUM);
 
     for (int GG = 0; GG < MAX; ++GG)
     {
-        fprintf(stdout, "%8s : is terminal?    %d\n", GS[GG], morningIsTerminal(mps, GG));
-        fprintf(stdout, "%8s : is nonterminal? %d\n", GS[GG], morningIsNonterminal(mps, GG));
-        fprintf(stdout, "%8s : is null?        %d\n", GS[GG], morningIsInNullKernel(mps, GG));
+        fprintf(stdout, "%8s : is terminal?    %d\n", GS[GG], morningIsTerminal(mrs, GG));
+        fprintf(stdout, "%8s : is nonterminal? %d\n", GS[GG], morningIsNonterminal(mrs, GG));
+        fprintf(stdout, "%8s : is null?        %d\n", GS[GG], morningIsInNullKernel(mrs, GG));
     }
 
-    fprintf(stdout, "LEN R0A0: %d\n", morningSequenceLength(mps, 0));
+    fprintf(stdout, "LEN R0A0: %d\n", morningSequenceLength(mrs, 0));
     int RuleStart   = 0;
-    while (!morningEndOfGrammar(mps, RuleStart))
+    while (!morningEndOfGrammar(mrs, RuleStart))
     {
-        int Len     = morningRuleLength(mps, RuleStart);
+        int Len     = morningRuleLength(mrs, RuleStart);
         if (!Len) break;
         fprintf(stdout, "LEN %d\n", Len);
         RuleStart   += Len + 1;
     }
 
     MorningItem item    = { 1, 0, 0, 0 };
-    printItem(0, mps, &item);
-    fprintf(stdout, "What? %s\n", GS[morningGetNTN(mps, &item)]);
+    printItem(0, mrs, &item);
+    fprintf(stdout, "What? %s\n", GS[morningGetNTN(mrs, &item)]);
     item.Alt            = 1;
-    printItem(0, mps, &item);
-    fprintf(stdout, "What? %s\n", GS[morningGetNTN(mps, &item)]);
+    printItem(0, mrs, &item);
+    fprintf(stdout, "What? %s\n", GS[morningGetNTN(mrs, &item)]);
     item.Rule           = 1;
     item.Alt            = 0;
-    printItem(0, mps, &item);
-    fprintf(stdout, "What? %s\n", GS[morningGetNTN(mps, &item)]);
+    printItem(0, mrs, &item);
+    fprintf(stdout, "What? %s\n", GS[morningGetNTN(mrs, &item)]);
     item.Alt            = 1;
-    printItem(0, mps, &item);
-    fprintf(stdout, "What? %s\n", GS[morningGetNTN(mps, &item)]);
+    printItem(0, mrs, &item);
+    fprintf(stdout, "What? %s\n", GS[morningGetNTN(mrs, &item)]);
 
     int lexemes[]   = { DIG, PLUS, LPAR, DIG, MUL, DIG, PLUS, DIG, RPAR, END };
     Gcb gcb =
@@ -183,22 +183,22 @@ int test()
     MorningItem NewItem                         = { };
     while (1)
     {
-        int result  = morningRecognizerStep(mps);
-        int Index   = morningGetIndex(mps);
+        int result  = morningRecognizerStep(mrs);
+        int Index   = morningGetIndex(mrs);
         if (result != 1)
         {
             break;
         }
-        fprintf(stdout, "[%4d] STATE: %s x %s\n", morningGetIndex(mps), STATES[morningGetState(mps)], EVENTS[morningGetEvent(mps)]);
+        fprintf(stdout, "[%4d] STATE: %s x %s\n", morningGetIndex(mrs), STATES[morningGetState(mrs)], EVENTS[morningGetEvent(mrs)]);
         MorningItem *WorkItem                   = { };
-        morningGetWorkItem(mps, &WorkItem);
-        switch (morningGetEvent(mps))
+        morningGetWorkItem(mrs, &WorkItem);
+        switch (morningGetEvent(mrs))
         {
         case MORNING_EVT_ERROR                  :
             break;
         case MORNING_EVT_GET_LEXEME             :
             fprintf(stdout, "       --> %s.\n", "GET LEXEME");
-            morningSetLexeme(mps, lexemes[morningGetIndex(mps)]);
+            morningSetLexeme(mrs, lexemes[morningGetIndex(mrs)]);
             break;
         case MORNING_EVT_ADD_ITEM_NEXT          : Index += 1;
         case MORNING_EVT_ADD_ITEM               :
@@ -210,24 +210,24 @@ int test()
                 }
                 fprintf(stdout, "       --> ITEM ADDED to idx %d.\n", Index);
                 fprintf(stdout, "%s", "           ");
-                printItem(Index, mps, WorkItem);
+                printItem(Index, mrs, WorkItem);
                 gcb.items[Index].insert(*WorkItem);
                 gcb.unused[Index].insert(*WorkItem);
             }
             break;
         case MORNING_EVT_GET_NEXT_ITEM          :
             {
-                fprintf(stdout, "       NUM ITEMS LEFT: %d\n", (int)gcb.unused[morningGetIndex(mps)].size());
-                if (gcb.unused[morningGetIndex(mps)].empty())
+                fprintf(stdout, "       NUM ITEMS LEFT: %d\n", (int)gcb.unused[morningGetIndex(mrs)].size());
+                if (gcb.unused[morningGetIndex(mrs)].empty())
                 {
                     break;
                 }
                 fprintf(stdout, "       --> %s.\n", "ITEM GOTTEN");
-                NewItem                 = *gcb.unused[morningGetIndex(mps)].begin();
-                gcb.unused[morningGetIndex(mps)].erase(gcb.unused[morningGetIndex(mps)].begin());
-                morningSetNewItem(mps, &NewItem);
+                NewItem                 = *gcb.unused[morningGetIndex(mrs)].begin();
+                gcb.unused[morningGetIndex(mrs)].erase(gcb.unused[morningGetIndex(mrs)].begin());
+                morningSetNewItem(mrs, &NewItem);
                 fprintf(stdout, "%s", "           ");
-                printItem(Index, mps, &NewItem);
+                printItem(Index, mrs, &NewItem);
             }
             break;
         case MORNING_EVT_INIT_PARENT_LIST       :
@@ -237,8 +237,8 @@ int test()
                 for (auto& item : gcb.items[WorkItem->Source])
                 {
                     fprintf(stdout, "%s", "       FILTERING:\n       ");
-                    printItem(Index, mps, (MorningItem*)&item);
-                    if (morningParentTrigger(mps, (MorningItem*)&item, WorkItem->Rule))
+                    printItem(Index, mrs, (MorningItem*)&item);
+                    if (morningParentTrigger(mrs, (MorningItem*)&item, WorkItem->Rule))
                     {
                         fprintf(stdout, "%s", "       ADDING.\n");
                         gcb.parents.push_back(&item);
@@ -249,7 +249,7 @@ int test()
         case MORNING_EVT_GET_NEXT_PARENT_ITEM   :
             if (!gcb.parents.empty())
             {
-                morningSetNewItem(mps, (MorningItem*)gcb.parents.front());
+                morningSetNewItem(mrs, (MorningItem*)gcb.parents.front());
                 gcb.parents.pop_front();
             }
             break;
@@ -269,7 +269,7 @@ int test()
         fprintf(stdout, "===%*.*s%d%*.*s===\n", pre, pre, "", Index, pos, pos, "");
         for (auto& item : items.second)
         {
-            printItem(Index, mps, (MorningItem*)&item);
+            printItem(Index, mrs, (MorningItem*)&item);
         }
         fprintf(stdout, "%s", "\n");
         ++Index;

@@ -187,20 +187,20 @@ int morningGetIndex(MorningRecogState*);
 MORNING_PSTATE morningGetState(MorningRecogState*);
 MORNING_EVENT morningGetEvent(MorningRecogState*);
 int morningGetWorkItem(MorningRecogState*, MorningItem** WorkItem);
-int morningParentTrigger(MorningRecogState* mps, MorningItem* item, int WhichRule);
+int morningParentTrigger(MorningRecogState* mrs, MorningItem* item, int WhichRule);
 
 int morningBuildRandomAccessTable(MorningRecogState*);
 int morningBuildNullKernel(MorningRecogState*);
 
-int morningRecognizerStep(MorningRecogState* mps);
-int morningRecognizerStepAct(MorningRecogState* mps, MorningRecogActions* mact);
+int morningRecognizerStep(MorningRecogState* mrs);
+int morningRecognizerStepAct(MorningRecogState* mrs, MorningRecogActions* mact);
 int morningRecognize(MorningRecogState*, MorningRecogActions* mact);
 
 int morningParseStateSize();
-int morningInitParseState(MorningParseState*);
+int morningInitParseState(MorningRecogState*, MorningParseState*);
 
-int morningParserStep(MorningParseState* mps);
-int morningParserStepAct(MorningParseState* mps, MorningParseActions* mact);
+int morningParserStep(MorningParseState* mrs);
+int morningParserStepAct(MorningParseState* mrs, MorningParseActions* mact);
 int morningParse(MorningParseState*, MorningParseActions* mact);
 
 #ifdef __cplusplus
@@ -224,8 +224,8 @@ typedef struct MorningRecogState
     int*                    ARAT;
     int                     NullTerminal;
     int*                    NullSet;
-
     int                     StartRule;
+
     int                     Index;
     int                     LastToken;
     MORNING_PSTATE          State;
@@ -235,86 +235,86 @@ typedef struct MorningRecogState
     int                     Lexeme;
 } MorningRecogState;
 
-int morningAddGrammar(MorningRecogState* mps, int* Grammar, int NumRules)
+int morningAddGrammar(MorningRecogState* mrs, int* Grammar, int NumRules)
 {
-    if (!mps) return 0;
+    if (!mrs) return 0;
     if (!Grammar) return 0;
     if (NumRules < 1) return 0;
-    mps->Grammar    = Grammar;
-    mps->NumRules   = NumRules;
+    mrs->Grammar    = Grammar;
+    mrs->NumRules   = NumRules;
     return 1;
 }
 
-int morningAddRandomAccessTable(MorningRecogState* mps, int (*RAT)[2], int* ARAT)
+int morningAddRandomAccessTable(MorningRecogState* mrs, int (*RAT)[2], int* ARAT)
 {
-    if (!mps) return 0;
+    if (!mrs) return 0;
     if (!RAT) return 0;
-    mps->RAT    = RAT;
-    mps->ARAT   = ARAT;
+    mrs->RAT    = RAT;
+    mrs->ARAT   = ARAT;
     return 1;
 }
 
-int morningAddNullKernel(MorningRecogState* mps, int nullTerminal, int* nullSet)
+int morningAddNullKernel(MorningRecogState* mrs, int nullTerminal, int* nullSet)
 {
-    if (!mps) return 0;
+    if (!mrs) return 0;
     if (!nullSet) return 0;
-    mps->NullTerminal   = nullTerminal;
-    mps->NullSet        = nullSet;
+    mrs->NullTerminal   = nullTerminal;
+    mrs->NullSet        = nullSet;
     return 1;
 }
 
-int morningSetStartRule(MorningRecogState* mps, int StartRule)
+int morningSetStartRule(MorningRecogState* mrs, int StartRule)
 {
-    if (!mps) return 0;
+    if (!mrs) return 0;
     if (!StartRule) return 0;
-    if (StartRule > mps->NumRules) return 0;
-    mps->StartRule  = StartRule;
+    if (StartRule > mrs->NumRules) return 0;
+    mrs->StartRule  = StartRule;
     return 1;
 }
 
-int morningSetLexeme(MorningRecogState* mps, int Lexeme)
+int morningSetLexeme(MorningRecogState* mrs, int Lexeme)
 {
-    if (!mps) return 0;
-    mps->Lexeme = Lexeme;
+    if (!mrs) return 0;
+    mrs->Lexeme = Lexeme;
     return 1;
 }
 
-int morningSetNewItem(MorningRecogState* mps, MorningItem* NewItem)
+int morningSetNewItem(MorningRecogState* mrs, MorningItem* NewItem)
 {
-    if (!mps) return 0;
-    mps->NewItem    = NewItem;
+    if (!mrs) return 0;
+    mrs->NewItem    = NewItem;
     return 1;
 }
 
-int* morningGetGrammar(MorningRecogState* mps)
+int* morningGetGrammar(MorningRecogState* mrs)
 {
-    if (!mps) return 0;
-    return mps->Grammar;
+    if (!mrs) return 0;
+    return mrs->Grammar;
 }
 
-int morningGetIndex(MorningRecogState* mps)
+int morningGetIndex(MorningRecogState* mrs)
 {
-    if (!mps) return -1;
-    return mps->Index;
+    if (!mrs) return -1;
+    return mrs->Index;
 }
 
-MORNING_PSTATE morningGetState(MorningRecogState* mps)
+MORNING_PSTATE morningGetState(MorningRecogState* mrs)
 {
-    if (!mps) return MORNING_PS_ERROR;
-    return mps->State;
+    if (!mrs) return MORNING_PS_ERROR;
+    return mrs->State;
 }
 
-MORNING_EVENT morningGetEvent(MorningRecogState* mps)
+MORNING_EVENT morningGetEvent(MorningRecogState* mrs)
 {
-    if (!mps) return MORNING_EVT_ERROR;
-    return mps->Event;
+    if (!mrs) return MORNING_EVT_ERROR;
+    return mrs->Event;
 }
 
-int morningGetWorkItem(MorningRecogState* mps, MorningItem** WorkItem)
+int morningGetWorkItem(MorningRecogState* mrs, MorningItem** WorkItem)
 {
-    if (!mps) return 0;
+    if (!mrs) return 0;
     if (!WorkItem) return 0;
-    *WorkItem   = &mps->WorkItem;
+    *WorkItem   = &mrs->WorkItem;
     return 1;
 }
 
@@ -323,171 +323,171 @@ int morningRecogStateSize()
     return sizeof(MorningRecogState);
 }
 
-int morningInitRecogState(MorningRecogState* mps)
+int morningInitRecogState(MorningRecogState* mrs)
 {
-    if (!mps) return 0;
-    for (int BB = 0; BB < sizeof(*mps); ++BB)
+    if (!mrs) return 0;
+    for (int BB = 0; BB < sizeof(*mrs); ++BB)
     {
-        ((unsigned char*)mps)[BB] = 0;
+        ((unsigned char*)mrs)[BB] = 0;
     }
-    mps->State      = MORNING_PS_INIT;
+    mrs->State      = MORNING_PS_INIT;
     return 1;
 }
 
-int morningIsTerminal(MorningRecogState* mps, int NTN)
+int morningIsTerminal(MorningRecogState* mrs, int NTN)
 {
-    if (!mps) return 0;
-    return NTN >= mps->NumRules;
+    if (!mrs) return 0;
+    return NTN >= mrs->NumRules;
 }
 
-int morningIsNonterminal(MorningRecogState* mps, int NTN)
+int morningIsNonterminal(MorningRecogState* mrs, int NTN)
 {
-    if (!mps) return 0;
-    return NTN && (NTN < mps->NumRules);
+    if (!mrs) return 0;
+    return NTN && (NTN < mrs->NumRules);
 }
 
-int morningIsNull(MorningRecogState* mps, int NTN)
+int morningIsNull(MorningRecogState* mrs, int NTN)
 {
-    if (!mps) return 0;
-    return NTN && (NTN == mps->NullTerminal);
+    if (!mrs) return 0;
+    return NTN && (NTN == mrs->NullTerminal);
 }
 
-int morningIsInNullKernel(MorningRecogState* mps, int NTN)
+int morningIsInNullKernel(MorningRecogState* mrs, int NTN)
 {
-    if (!morningIsNonterminal(mps, NTN)) return 0;
-    if (!mps->NullSet) return 0;
-    return mps->NullSet[NTN];
+    if (!morningIsNonterminal(mrs, NTN)) return 0;
+    if (!mrs->NullSet) return 0;
+    return mrs->NullSet[NTN];
 }
 
-int morningSequenceLength(MorningRecogState* mps, int AltStart)
+int morningSequenceLength(MorningRecogState* mrs, int AltStart)
 {
-    if (!mps) return 0;
+    if (!mrs) return 0;
     int AA  = AltStart;
-    while (mps->Grammar[AA])
+    while (mrs->Grammar[AA])
     {
         ++AA;
     }
     return AA - AltStart;
 }
 
-int morningRuleLength(MorningRecogState* mps, int RuleStart)
+int morningRuleLength(MorningRecogState* mrs, int RuleStart)
 {
-    if (!mps) return 0;
+    if (!mrs) return 0;
     int SeqLen  = 0;
     do
     {
-        int AltLen  = morningSequenceLength(mps, RuleStart + SeqLen);
+        int AltLen  = morningSequenceLength(mrs, RuleStart + SeqLen);
         SeqLen      += AltLen + 1;
     }
-    while (mps->Grammar[RuleStart + SeqLen]);
+    while (mrs->Grammar[RuleStart + SeqLen]);
     return SeqLen;
 }
 
-int morningEndOfGrammar(MorningRecogState* mps, int RuleStart)
+int morningEndOfGrammar(MorningRecogState* mrs, int RuleStart)
 {
-    if (!mps) return 0;
-    return !!!mps->Grammar[RuleStart];
+    if (!mrs) return 0;
+    return !!!mrs->Grammar[RuleStart];
 }
 
-int morningRuleBase(MorningRecogState* mps, MorningItem* item)
+int morningRuleBase(MorningRecogState* mrs, MorningItem* item)
 {
-    if (!mps) return 0;
+    if (!mrs) return 0;
     if (!item) return 0;
-    if (item->Rule >= mps->NumRules) return 0;
-    int RuleBase        = mps->RAT[item->Rule][0];
-    int AltBase         = mps->ARAT[RuleBase + 0];
+    if (item->Rule >= mrs->NumRules) return 0;
+    int RuleBase        = mrs->RAT[item->Rule][0];
+    int AltBase         = mrs->ARAT[RuleBase + 0];
     return AltBase;
 }
 
-int morningAltBase(MorningRecogState* mps, MorningItem* item)
+int morningAltBase(MorningRecogState* mrs, MorningItem* item)
 {
-    if (!mps) return 0;
+    if (!mrs) return 0;
     if (!item) return 0;
-    if (item->Rule >= mps->NumRules) return 0;
-    int RuleBase        = mps->RAT[item->Rule][0];
-    int NumAlts         = mps->RAT[item->Rule][1] - RuleBase;
+    if (item->Rule >= mrs->NumRules) return 0;
+    int RuleBase        = mrs->RAT[item->Rule][0];
+    int NumAlts         = mrs->RAT[item->Rule][1] - RuleBase;
     if (item->Alt >= NumAlts) return 0;
-    int AltBase         = mps->ARAT[RuleBase + item->Alt];
+    int AltBase         = mrs->ARAT[RuleBase + item->Alt];
     return AltBase;
 }
 
-int morningGetNTN(MorningRecogState* mps, MorningItem* item)
+int morningGetNTN(MorningRecogState* mrs, MorningItem* item)
 {
-    if (!mps) return 0;
+    if (!mrs) return 0;
     if (!item) return 0;
-    if (item->Rule >= mps->NumRules) return 0;
-    int RuleBase        = mps->RAT[item->Rule][0];
-    int NumAlts         = mps->RAT[item->Rule][1] - RuleBase;
+    if (item->Rule >= mrs->NumRules) return 0;
+    int RuleBase        = mrs->RAT[item->Rule][0];
+    int NumAlts         = mrs->RAT[item->Rule][1] - RuleBase;
     if (item->Alt >= NumAlts) return 0;
-    int AltBase         = mps->ARAT[RuleBase + item->Alt];
+    int AltBase         = mrs->ARAT[RuleBase + item->Alt];
     // XXX: We can't check for shenanigans, here, sorry.
-    int NTN             = mps->Grammar[AltBase + item->Dot];
+    int NTN             = mrs->Grammar[AltBase + item->Dot];
     return NTN;
 }
 
-int morningNumAlternates(MorningRecogState* mps, MorningItem* item)
+int morningNumAlternates(MorningRecogState* mrs, MorningItem* item)
 {
-    if (!mps) return 0;
+    if (!mrs) return 0;
     if (!item) return 0;
-    if (item->Rule >= mps->NumRules) return 0;
-    return mps->RAT[item->Rule][1] - mps->RAT[item->Rule][0];
+    if (item->Rule >= mrs->NumRules) return 0;
+    return mrs->RAT[item->Rule][1] - mrs->RAT[item->Rule][0];
 }
 
-int morningBuildRandomAccessTable(MorningRecogState* mps)
+int morningBuildRandomAccessTable(MorningRecogState* mrs)
 {
-    if (!mps) return 0;
-    if (!mps->Grammar) return 0;
-    if (mps->NumRules < 1) return 0;
-    for (int RR = 1, PP = 0, AR = 0; RR <= mps->NumRules; ++RR)
+    if (!mrs) return 0;
+    if (!mrs->Grammar) return 0;
+    if (mrs->NumRules < 1) return 0;
+    for (int RR = 1, PP = 0, AR = 0; RR <= mrs->NumRules; ++RR)
     {
-        mps->RAT[RR][0]     = AR;
+        mrs->RAT[RR][0]     = AR;
         //fprintf(stdout, "RAT[%d][%d] = %d\n", RR, 0, AR);
-        for (int AA = PP; mps->Grammar[AA]; ++AR)
+        for (int AA = PP; mrs->Grammar[AA]; ++AR)
         {
-            mps->ARAT[AR]   = AA;
+            mrs->ARAT[AR]   = AA;
             //fprintf(stdout, "    ARAT[%d] = %d\n", AR, AA);
-            for (int SS = AA; mps->Grammar[SS]; ++SS, ++AA, ++PP)
+            for (int SS = AA; mrs->Grammar[SS]; ++SS, ++AA, ++PP)
             {
             }
             ++AA;
             ++PP;
         }
-        mps->RAT[RR][1]     = AR;
+        mrs->RAT[RR][1]     = AR;
         //fprintf(stdout, "RAT[%d][%d] = %d\n", RR, 1, AR);
         ++PP;
     }
     return 1;
 }
 
-int morningBuildNullKernel(MorningRecogState* mps)
+int morningBuildNullKernel(MorningRecogState* mrs)
 {
-    if (!mps) return 0;
-    if (mps->NullTerminal == 0)
+    if (!mrs) return 0;
+    if (mrs->NullTerminal == 0)
     {
         return 1;
     }
-    for (int RR = 0; RR < mps->NumRules; ++RR)
+    for (int RR = 0; RR < mrs->NumRules; ++RR)
     {
-        mps->NullSet[RR] = 0;
+        mrs->NullSet[RR] = 0;
     }
     int anyNewSet   = 0;
     do
     {
         anyNewSet   = 0;
-        for (int RR = 0; RR < mps->NumRules; ++RR)
+        for (int RR = 0; RR < mrs->NumRules; ++RR)
         {
-            for (int AA = mps->RAT[RR][0]; AA < mps->RAT[RR][1]; ++AA)
+            for (int AA = mrs->RAT[RR][0]; AA < mrs->RAT[RR][1]; ++AA)
             {
                 int allNullTerminal = 1;
-                for (int SS = mps->ARAT[AA]; mps->Grammar[SS]; ++SS)
+                for (int SS = mrs->ARAT[AA]; mrs->Grammar[SS]; ++SS)
                 {
-                    int seq = mps->Grammar[SS];
-                    allNullTerminal &= ((seq >= mps->NumRules) && (seq == mps->NullTerminal)) || ((seq < mps->NumRules) && mps->NullSet[seq]);
+                    int seq = mrs->Grammar[SS];
+                    allNullTerminal &= ((seq >= mrs->NumRules) && (seq == mrs->NullTerminal)) || ((seq < mrs->NumRules) && mrs->NullSet[seq]);
                 }
                 if (allNullTerminal)
                 {
-                    anyNewSet   = !mps->NullSet[RR];
-                    mps->NullSet[RR] = 1;
+                    anyNewSet   = !mrs->NullSet[RR];
+                    mrs->NullSet[RR] = 1;
                 }
             }
         }
@@ -495,33 +495,33 @@ int morningBuildNullKernel(MorningRecogState* mps)
     return 1;
 }
 
-int morningParentTrigger(MorningRecogState* mps, MorningItem* item, int WhichRule)
+int morningParentTrigger(MorningRecogState* mrs, MorningItem* item, int WhichRule)
 {
-    if (!mps) return 0;
+    if (!mrs) return 0;
     if (!item) return 0;
     if (WhichRule == 0) return 0;
-    if (WhichRule >= mps->NumRules) return 0;
+    if (WhichRule >= mrs->NumRules) return 0;
 
-    int RuleIndex       = mps->RAT[item->Rule][0];
-    int NumAlts         = mps->RAT[item->Rule][1] - RuleIndex;
+    int RuleIndex       = mrs->RAT[item->Rule][0];
+    int NumAlts         = mrs->RAT[item->Rule][1] - RuleIndex;
     if (item->Alt >= NumAlts)
     {
         return 0;
     }
     int AltIndex        = RuleIndex + item->Alt;
-    int TheRule         = mps->ARAT[AltIndex];
-    int NTN             = mps->Grammar[TheRule + item->Dot];
+    int TheRule         = mrs->ARAT[AltIndex];
+    int NTN             = mrs->Grammar[TheRule + item->Dot];
     return NTN == WhichRule;
 }
 
-int morningRecognizerStep(MorningRecogState* mps)
+int morningRecognizerStep(MorningRecogState* mrs)
 {
-    if (!mps) return -1;
+    if (!mrs) return -1;
 
-    mps->Event                  = MORNING_EVT_NONE;
+    mrs->Event                  = MORNING_EVT_NONE;
     int result                  = 0;
 
-    switch (mps->State)
+    switch (mrs->State)
     {
     case MORNING_PS_ERROR                   :
         result                  = -1;
@@ -530,34 +530,34 @@ int morningRecognizerStep(MorningRecogState* mps)
         result                  = 0;
         break;
     case MORNING_PS_INIT                    :
-        mps->State              = MORNING_PS_INIT_ITEMS;
-        mps->Event              = MORNING_EVT_ADD_ITEM;
-        mps->Index              = 0;
-        mps->WorkItem.Rule      = mps->StartRule;
-        mps->WorkItem.Alt       = 0;
-        mps->WorkItem.Dot       = 0;
-        mps->WorkItem.Source    = 0;
-        result                  = mps->StartRule && (mps->StartRule <= mps->NumRules);
+        mrs->State              = MORNING_PS_INIT_ITEMS;
+        mrs->Event              = MORNING_EVT_ADD_ITEM;
+        mrs->Index              = 0;
+        mrs->WorkItem.Rule      = mrs->StartRule;
+        mrs->WorkItem.Alt       = 0;
+        mrs->WorkItem.Dot       = 0;
+        mrs->WorkItem.Source    = 0;
+        result                  = mrs->StartRule && (mrs->StartRule <= mrs->NumRules);
         break;
     case MORNING_PS_INIT_ITEMS              :
         {
-            int NumAlts         = morningNumAlternates(mps, &mps->WorkItem);
-            ++mps->WorkItem.Alt;
-            if (mps->WorkItem.Alt < NumAlts)
+            int NumAlts         = morningNumAlternates(mrs, &mrs->WorkItem);
+            ++mrs->WorkItem.Alt;
+            if (mrs->WorkItem.Alt < NumAlts)
             {
-                mps->Event      = MORNING_EVT_ADD_ITEM;
+                mrs->Event      = MORNING_EVT_ADD_ITEM;
             }
             else
             {
-                mps->State      = MORNING_PS_ANALYZE_ITEM;
-                mps->Event      = MORNING_EVT_GET_NEXT_ITEM;
+                mrs->State      = MORNING_PS_ANALYZE_ITEM;
+                mrs->Event      = MORNING_EVT_GET_NEXT_ITEM;
             }
             result              = 1;
         }
         break;
     case MORNING_PS_LEX_NEXT                :
-        mps->State                      = MORNING_PS_ANALYZE_ITEM;
-        mps->Event                      = MORNING_EVT_GET_NEXT_ITEM;
+        mrs->State                      = MORNING_PS_ANALYZE_ITEM;
+        mrs->Event                      = MORNING_EVT_GET_NEXT_ITEM;
         result                          = 1;
         break;
     case MORNING_PS_SCANNING                :
@@ -566,18 +566,18 @@ int morningRecognizerStep(MorningRecogState* mps)
         //          add [ A -> ... a * ..., j] to S_i+1
         //
         {
-            int NTN                     = morningGetNTN(mps, &mps->WorkItem);
-            if (NTN == mps->Lexeme)
+            int NTN                     = morningGetNTN(mrs, &mrs->WorkItem);
+            if (NTN == mrs->Lexeme)
             {
-                mps->WorkItem.Dot       += 1;
-                mps->State              = MORNING_PS_GET_NEXT_ITEM;
-                mps->Event              = MORNING_EVT_ADD_ITEM_NEXT;
+                mrs->WorkItem.Dot       += 1;
+                mrs->State              = MORNING_PS_GET_NEXT_ITEM;
+                mrs->Event              = MORNING_EVT_ADD_ITEM_NEXT;
                 result                  = 1;
             }
             else
             {
-                mps->State              = MORNING_PS_ANALYZE_ITEM;
-                mps->Event              = MORNING_EVT_GET_NEXT_ITEM;
+                mrs->State              = MORNING_PS_ANALYZE_ITEM;
+                mrs->Event              = MORNING_EVT_GET_NEXT_ITEM;
                 result                  = 1;
             }
         }
@@ -589,30 +589,30 @@ int morningRecognizerStep(MorningRecogState* mps)
         //          [B -> ... * A ..., k] in S_j
         //
         {
-            mps->State                  = MORNING_PS_GET_NEXT_PARENT_ITEM;
-            mps->Event                  = MORNING_EVT_GET_NEXT_PARENT_ITEM;
+            mrs->State                  = MORNING_PS_GET_NEXT_PARENT_ITEM;
+            mrs->Event                  = MORNING_EVT_GET_NEXT_PARENT_ITEM;
             result                      = 1;
         }
         break;
     case MORNING_PS_GET_NEXT_PARENT_ITEM    :
-        if (mps->NewItem)
+        if (mrs->NewItem)
         {
-            mps->State                  = MORNING_PS_ADD_PARENT_ITEM;
-            mps->Event                  = MORNING_EVT_ADD_ITEM;
-            mps->WorkItem               = *mps->NewItem;
-            mps->WorkItem.Dot           += 1;
+            mrs->State                  = MORNING_PS_ADD_PARENT_ITEM;
+            mrs->Event                  = MORNING_EVT_ADD_ITEM;
+            mrs->WorkItem               = *mrs->NewItem;
+            mrs->WorkItem.Dot           += 1;
             result                      = 1;
         }
         else
         {
-            mps->State                  = MORNING_PS_ANALYZE_ITEM;
-            mps->Event                  = MORNING_EVT_GET_NEXT_ITEM;
+            mrs->State                  = MORNING_PS_ANALYZE_ITEM;
+            mrs->Event                  = MORNING_EVT_GET_NEXT_ITEM;
             result                      = 1;
         }
         break;
     case MORNING_PS_ADD_PARENT_ITEM         :
-        mps->State                      = MORNING_PS_GET_NEXT_PARENT_ITEM;
-        mps->Event                      = MORNING_EVT_GET_NEXT_PARENT_ITEM;
+        mrs->State                      = MORNING_PS_GET_NEXT_PARENT_ITEM;
+        mrs->Event                      = MORNING_EVT_GET_NEXT_PARENT_ITEM;
         result                          = 1;
         break;
     case MORNING_PS_PREDICTION              :
@@ -621,23 +621,23 @@ int morningRecognizerStep(MorningRecogState* mps)
         //          [B -> * C ..., i] to S_i for all rules B -> C
         //
         {
-            int NumAlts                 = morningNumAlternates(mps, &mps->WorkItem);
-            ++mps->WorkItem.Alt;
-            if (mps->WorkItem.Alt < NumAlts)
+            int NumAlts                 = morningNumAlternates(mrs, &mrs->WorkItem);
+            ++mrs->WorkItem.Alt;
+            if (mrs->WorkItem.Alt < NumAlts)
             {
-                mps->Event              = MORNING_EVT_ADD_ITEM;
+                mrs->Event              = MORNING_EVT_ADD_ITEM;
             }
             else
             {
-                mps->State              = MORNING_PS_ANALYZE_ITEM;
-                mps->Event              = MORNING_EVT_GET_NEXT_ITEM;
+                mrs->State              = MORNING_PS_ANALYZE_ITEM;
+                mrs->Event              = MORNING_EVT_GET_NEXT_ITEM;
             }
             result                      = 1;
         }
         break;
     case MORNING_PS_GET_NEXT_ITEM           :
-        mps->State                      = MORNING_PS_ANALYZE_ITEM;
-        mps->Event                      = MORNING_EVT_GET_NEXT_ITEM;
+        mrs->State                      = MORNING_PS_ANALYZE_ITEM;
+        mrs->Event                      = MORNING_EVT_GET_NEXT_ITEM;
         result                          = 1;
         break;
     case MORNING_PS_PREDICT_NULLABLE        :
@@ -645,65 +645,65 @@ int morningRecognizerStep(MorningRecogState* mps)
         //     [A -> ... B * ..., j]
         // Then we go on to the regular prediction.
         {
-            mps->WorkItem.Dot           = -1;
-            int NTN                     = morningGetNTN(mps, &mps->WorkItem);
-            mps->State                  = MORNING_PS_PREDICTION;
-            mps->Event                  = MORNING_EVT_ADD_ITEM;
-            mps->WorkItem.Rule          = NTN;
-            mps->WorkItem.Alt           = 0;
-            mps->WorkItem.Dot           = 0;
-            mps->WorkItem.Source        = mps->Index;
+            mrs->WorkItem.Dot           = -1;
+            int NTN                     = morningGetNTN(mrs, &mrs->WorkItem);
+            mrs->State                  = MORNING_PS_PREDICTION;
+            mrs->Event                  = MORNING_EVT_ADD_ITEM;
+            mrs->WorkItem.Rule          = NTN;
+            mrs->WorkItem.Alt           = 0;
+            mrs->WorkItem.Dot           = 0;
+            mrs->WorkItem.Source        = mrs->Index;
             result                      = 1;
         }
         break;
     case MORNING_PS_ANALYZE_ITEM            :
-        if (mps->NewItem)
+        if (mrs->NewItem)
         {
-            mps->WorkItem               = *mps->NewItem;
-            int NTN                     = morningGetNTN(mps, &mps->WorkItem);
+            mrs->WorkItem               = *mrs->NewItem;
+            int NTN                     = morningGetNTN(mrs, &mrs->WorkItem);
             if (NTN == 0)
             {
-                mps->State              = MORNING_PS_COMPLETION;
-                mps->Event              = MORNING_EVT_INIT_PARENT_LIST;
+                mrs->State              = MORNING_PS_COMPLETION;
+                mrs->Event              = MORNING_EVT_INIT_PARENT_LIST;
                 result                  = 1;
             }
-            else if (NTN <= mps->NumRules)
+            else if (NTN <= mrs->NumRules)
             {
-                MorningItem Next        = mps->WorkItem;
+                MorningItem Next        = mrs->WorkItem;
                 Next.Dot                += 1;
-                int nextNTN             = morningGetNTN(mps, &Next);
-                if ((nextNTN < mps->NumRules) && mps->NullSet[nextNTN])
+                int nextNTN             = morningGetNTN(mrs, &Next);
+                if ((nextNTN < mrs->NumRules) && mrs->NullSet[nextNTN])
                 {
-                    mps->State              = MORNING_PS_PREDICT_NULLABLE;
-                    mps->Event              = MORNING_EVT_ADD_ITEM;
-                    mps->WorkItem           = Next;
+                    mrs->State              = MORNING_PS_PREDICT_NULLABLE;
+                    mrs->Event              = MORNING_EVT_ADD_ITEM;
+                    mrs->WorkItem           = Next;
                     result                  = 1;
                 }
                 else
                 {
-                    mps->State              = MORNING_PS_PREDICTION;
-                    mps->Event              = MORNING_EVT_ADD_ITEM;
-                    mps->WorkItem.Rule      = NTN;
-                    mps->WorkItem.Alt       = 0;
-                    mps->WorkItem.Dot       = 0;
-                    mps->WorkItem.Source    = mps->Index;
+                    mrs->State              = MORNING_PS_PREDICTION;
+                    mrs->Event              = MORNING_EVT_ADD_ITEM;
+                    mrs->WorkItem.Rule      = NTN;
+                    mrs->WorkItem.Alt       = 0;
+                    mrs->WorkItem.Dot       = 0;
+                    mrs->WorkItem.Source    = mrs->Index;
                     result                  = 1;
                 }
             }
             else
             {
-                mps->State              = MORNING_PS_SCANNING;
-                mps->Event              = MORNING_EVT_GET_LEXEME;
+                mrs->State              = MORNING_PS_SCANNING;
+                mrs->Event              = MORNING_EVT_GET_LEXEME;
                 result                  = 1;
             }
         }
         else
         {
-            if (mps->Lexeme)
+            if (mrs->Lexeme)
             {
-                mps->Index              += 1;
-                mps->State              = MORNING_PS_LEX_NEXT;
-                mps->Event              = MORNING_EVT_GET_LEXEME;
+                mrs->Index              += 1;
+                mrs->State              = MORNING_PS_LEX_NEXT;
+                mrs->Event              = MORNING_EVT_GET_LEXEME;
                 result                  = 1;
             }
             else
@@ -714,43 +714,103 @@ int morningRecognizerStep(MorningRecogState* mps)
         break;
     }
 
-    mps->NewItem                = 0;
+    mrs->NewItem                = 0;
 
     return result;
 }
 
-int morningRecognizerStepAct(MorningRecogState* mps, MorningRecogActions* mact)
+int morningRecognizerStepAct(MorningRecogState* mrs, MorningRecogActions* mact)
 {
-    if (!morningRecognizerStep(mps))
+    if (!morningRecognizerStep(mrs))
     {
         return 0;
     }
-    switch (mps->Event)
+    switch (mrs->Event)
     {
     case MORNING_EVT_ERROR                  : return -1;
-    case MORNING_EVT_GET_LEXEME             : return mact->GetLexeme(mact->Handle, mps);
-    case MORNING_EVT_ADD_ITEM               : return mact->AddItem(mact->Handle, mps);
-    case MORNING_EVT_ADD_ITEM_NEXT          : return mact->AddItemNext(mact->Handle, mps);
-    case MORNING_EVT_GET_NEXT_ITEM          : return mact->GetNextItem(mact->Handle, mps);
-    case MORNING_EVT_INIT_PARENT_LIST       : return mact->InitParentList(mact->Handle, mps);
-    case MORNING_EVT_GET_NEXT_PARENT_ITEM   : return mact->GetNextParentItem(mact->Handle, mps);
+    case MORNING_EVT_GET_LEXEME             : return mact->GetLexeme(mact->Handle, mrs);
+    case MORNING_EVT_ADD_ITEM               : return mact->AddItem(mact->Handle, mrs);
+    case MORNING_EVT_ADD_ITEM_NEXT          : return mact->AddItemNext(mact->Handle, mrs);
+    case MORNING_EVT_GET_NEXT_ITEM          : return mact->GetNextItem(mact->Handle, mrs);
+    case MORNING_EVT_INIT_PARENT_LIST       : return mact->InitParentList(mact->Handle, mrs);
+    case MORNING_EVT_GET_NEXT_PARENT_ITEM   : return mact->GetNextParentItem(mact->Handle, mrs);
     case MORNING_EVT_NONE                   : return 0;
     }
     return -1;
 }
 
-int morningRecognize(MorningRecogState* mps, MorningRecogActions* mact)
+int morningRecognize(MorningRecogState* mrs, MorningRecogActions* mact)
 {
-    if (!mps) return -1;
+    if (!mrs) return -1;
     if (!mact) return -1;
     do
     {
-        int result  = morningRecognizerStepAct(mps, mact);
+        int result  = morningRecognizerStepAct(mrs, mact);
         if (result < 0) return -1;
         if (result == 0) break;
     }
     while (1);
     return 1;
+}
+
+typedef struct MorningParseState
+{
+    int*                    Grammar;
+    int                     NumRules;
+    int                   (*RAT)[2];
+    int*                    ARAT;
+    int                     NullTerminal;
+    int*                    NullSet;
+    int                     StartRule;
+} MorningParseState;
+
+int morningParseStateSize()
+{
+    return sizeof(MorningParseState);
+}
+
+int morningInitParseState(MorningRecogState* mrs, MorningParseState* mps)
+{
+    if (!mrs) return 0;
+    if (!mps) return 0;
+
+    mps->Grammar        = mrs->Grammar;
+    mps->NumRules       = mrs->NumRules;
+    mps->RAT            = mrs->RAT;
+    mps->ARAT           = mrs->ARAT;
+    mps->NullTerminal   = mrs->NullTerminal;
+    mps->NullSet        = mrs->NullSet;
+    mps->StartRule      = mrs->StartRule;
+
+    return 1;
+}
+
+int morningParserStep(MorningParseState* mps)
+{
+    /*
+
+    Depth first search:
+
+        (1) Initialize with all the Start rules with the Dot at the complete state,
+            with the Source of (0) (full parse).
+        (2) Pop an item off the stack.
+            (1) Ask if this item is in the current index;
+            (2) If it is, ask for all the items who's LHS is the rule that is completed
+                at the dot; add those items to the list
+        (3) Keep going until there's no more items.
+
+    */
+    return 0;
+}
+
+int morningParserStepAct(MorningParseState* mps, MorningParseActions* mact)
+{
+    return 0;
+}
+
+int morningParse(MorningParseState*, MorningParseActions* mact)
+{
+    return 0;
 }
 
 #ifdef __cplusplus
