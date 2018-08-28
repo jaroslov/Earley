@@ -130,7 +130,7 @@ MORNING_ACTION_TABLE(MORNING_ENTRY)
 #undef MORNING_ENTRY
 } MORNING_ACTION;
 
-typedef struct MorningParseState MorningParseState;
+typedef struct MorningRecogState MorningRecogState;
 
 typedef struct MorningItem
 {
@@ -141,7 +141,7 @@ typedef struct MorningItem
     int                     Source;
 } MorningItem;
 
-typedef int (*MorningAction)    (void*, MorningParseState*);
+typedef int (*MorningAction)    (void*, MorningRecogState*);
 
 typedef struct MorningActions
 {
@@ -153,42 +153,42 @@ typedef struct MorningActions
     MorningAction   GetNextParentItem;
 } MorningActions;
 
-int morningParseStateSize();
-int morningInitParseState(MorningParseState*);
+int morningRecogStateSize();
+int morningInitRecogState(MorningRecogState*);
 
-int morningIsTerminal(MorningParseState*, int NTN);
-int morningIsNonterminal(MorningParseState*, int NTN);
-int morningIsNull(MorningParseState*, int NTN);
-int morningIsInNullKernel(MorningParseState*, int NTN);
-int morningSequenceLength(MorningParseState*, int AltStart);
-int morningRuleLength(MorningParseState*, int RuleStart);
-int morningEndOfGrammar(MorningParseState*, int RuleStart);
-int morningRuleBase(MorningParseState*, MorningItem*);
-int morningAltBase(MorningParseState*, MorningItem*);
-int morningGetNTN(MorningParseState*, MorningItem*);
-int morningNumAlternates(MorningParseState*, MorningItem*);
+int morningIsTerminal(MorningRecogState*, int NTN);
+int morningIsNonterminal(MorningRecogState*, int NTN);
+int morningIsNull(MorningRecogState*, int NTN);
+int morningIsInNullKernel(MorningRecogState*, int NTN);
+int morningSequenceLength(MorningRecogState*, int AltStart);
+int morningRuleLength(MorningRecogState*, int RuleStart);
+int morningEndOfGrammar(MorningRecogState*, int RuleStart);
+int morningRuleBase(MorningRecogState*, MorningItem*);
+int morningAltBase(MorningRecogState*, MorningItem*);
+int morningGetNTN(MorningRecogState*, MorningItem*);
+int morningNumAlternates(MorningRecogState*, MorningItem*);
 
-int morningAddGrammar(MorningParseState*, int* Grammar, int NumRules);
-int morningAddRandomAccessTable(MorningParseState*, int (*RAT)[2], int* ARAT);
-int morningAddNullKernel(MorningParseState*, int nullTerminal, int* nullSet);
-int morningSetStartRule(MorningParseState*, int StartRule);
-int morningSetLexeme(MorningParseState*, int Lexeme);
-int morningSetNewItem(MorningParseState*, MorningItem* NewItem);
+int morningAddGrammar(MorningRecogState*, int* Grammar, int NumRules);
+int morningAddRandomAccessTable(MorningRecogState*, int (*RAT)[2], int* ARAT);
+int morningAddNullKernel(MorningRecogState*, int nullTerminal, int* nullSet);
+int morningSetStartRule(MorningRecogState*, int StartRule);
+int morningSetLexeme(MorningRecogState*, int Lexeme);
+int morningSetNewItem(MorningRecogState*, MorningItem* NewItem);
 
-int* morningGetGrammar(MorningParseState*);
-int morningGetIndex(MorningParseState*);
-MORNING_PSTATE morningGetState(MorningParseState*);
-MORNING_EVENT morningGetEvent(MorningParseState*);
-MORNING_ACTION morningGetAction(MorningParseState*);
-int morningGetWorkItem(MorningParseState*, MorningItem** WorkItem);
-int morningParentTrigger(MorningParseState* mps, MorningItem* item, int WhichRule);
+int* morningGetGrammar(MorningRecogState*);
+int morningGetIndex(MorningRecogState*);
+MORNING_PSTATE morningGetState(MorningRecogState*);
+MORNING_EVENT morningGetEvent(MorningRecogState*);
+MORNING_ACTION morningGetAction(MorningRecogState*);
+int morningGetWorkItem(MorningRecogState*, MorningItem** WorkItem);
+int morningParentTrigger(MorningRecogState* mps, MorningItem* item, int WhichRule);
 
-int morningBuildRandomAccessTable(MorningParseState*);
-int morningBuildNullKernel(MorningParseState*);
+int morningBuildRandomAccessTable(MorningRecogState*);
+int morningBuildNullKernel(MorningRecogState*);
 
-int morningRecognizerStep(MorningParseState* mps);
-int morningRecognizerStepAct(MorningParseState* mps, MorningActions* mact);
-int morningRecognize(MorningParseState*, MorningActions* mact);
+int morningRecognizerStep(MorningRecogState* mps);
+int morningRecognizerStepAct(MorningRecogState* mps, MorningActions* mact);
+int morningRecognize(MorningRecogState*, MorningActions* mact);
 
 #ifdef __cplusplus
 } // extern "C"
@@ -206,7 +206,7 @@ extern "C"
 /*
 
     We parse 'on the fly'. The general idea is that as we complete
-    (or match a token) we define a Parse-action for that event, i.e.,
+    (or match a token) we define a Recog-action for that event, i.e.,
 
         Action(MorningItem, Index, ...)
 
@@ -228,7 +228,7 @@ extern "C"
 
 */
 
-typedef struct MorningParseState
+typedef struct MorningRecogState
 {
     int*                    Grammar;
     int                     NumRules;
@@ -246,9 +246,9 @@ typedef struct MorningParseState
     MorningItem             WorkItem;
     MorningItem            *NewItem;
     int                     Lexeme;
-} MorningParseState;
+} MorningRecogState;
 
-int morningAddGrammar(MorningParseState* mps, int* Grammar, int NumRules)
+int morningAddGrammar(MorningRecogState* mps, int* Grammar, int NumRules)
 {
     if (!mps) return 0;
     if (!Grammar) return 0;
@@ -258,7 +258,7 @@ int morningAddGrammar(MorningParseState* mps, int* Grammar, int NumRules)
     return 1;
 }
 
-int morningAddRandomAccessTable(MorningParseState* mps, int (*RAT)[2], int* ARAT)
+int morningAddRandomAccessTable(MorningRecogState* mps, int (*RAT)[2], int* ARAT)
 {
     if (!mps) return 0;
     if (!RAT) return 0;
@@ -267,7 +267,7 @@ int morningAddRandomAccessTable(MorningParseState* mps, int (*RAT)[2], int* ARAT
     return 1;
 }
 
-int morningAddNullKernel(MorningParseState* mps, int nullTerminal, int* nullSet)
+int morningAddNullKernel(MorningRecogState* mps, int nullTerminal, int* nullSet)
 {
     if (!mps) return 0;
     if (!nullSet) return 0;
@@ -276,7 +276,7 @@ int morningAddNullKernel(MorningParseState* mps, int nullTerminal, int* nullSet)
     return 1;
 }
 
-int morningSetStartRule(MorningParseState* mps, int StartRule)
+int morningSetStartRule(MorningRecogState* mps, int StartRule)
 {
     if (!mps) return 0;
     if (!StartRule) return 0;
@@ -285,51 +285,51 @@ int morningSetStartRule(MorningParseState* mps, int StartRule)
     return 1;
 }
 
-int morningSetLexeme(MorningParseState* mps, int Lexeme)
+int morningSetLexeme(MorningRecogState* mps, int Lexeme)
 {
     if (!mps) return 0;
     mps->Lexeme = Lexeme;
     return 1;
 }
 
-int morningSetNewItem(MorningParseState* mps, MorningItem* NewItem)
+int morningSetNewItem(MorningRecogState* mps, MorningItem* NewItem)
 {
     if (!mps) return 0;
     mps->NewItem    = NewItem;
     return 1;
 }
 
-int* morningGetGrammar(MorningParseState* mps)
+int* morningGetGrammar(MorningRecogState* mps)
 {
     if (!mps) return 0;
     return mps->Grammar;
 }
 
-int morningGetIndex(MorningParseState* mps)
+int morningGetIndex(MorningRecogState* mps)
 {
     if (!mps) return -1;
     return mps->Index;
 }
 
-MORNING_PSTATE morningGetState(MorningParseState* mps)
+MORNING_PSTATE morningGetState(MorningRecogState* mps)
 {
     if (!mps) return MORNING_PS_ERROR;
     return mps->State;
 }
 
-MORNING_EVENT morningGetEvent(MorningParseState* mps)
+MORNING_EVENT morningGetEvent(MorningRecogState* mps)
 {
     if (!mps) return MORNING_EVT_ERROR;
     return mps->Event;
 }
 
-MORNING_ACTION morningGetAction(MorningParseState* mps)
+MORNING_ACTION morningGetAction(MorningRecogState* mps)
 {
     if (!mps) return MORNING_ACT_PARSE;
     return mps->Action;
 }
 
-int morningGetWorkItem(MorningParseState* mps, MorningItem** WorkItem)
+int morningGetWorkItem(MorningRecogState* mps, MorningItem** WorkItem)
 {
     if (!mps) return 0;
     if (!WorkItem) return 0;
@@ -337,12 +337,12 @@ int morningGetWorkItem(MorningParseState* mps, MorningItem** WorkItem)
     return 1;
 }
 
-int morningParseStateSize()
+int morningRecogStateSize()
 {
-    return sizeof(MorningParseState);
+    return sizeof(MorningRecogState);
 }
 
-int morningInitParseState(MorningParseState* mps)
+int morningInitRecogState(MorningRecogState* mps)
 {
     if (!mps) return 0;
     for (int BB = 0; BB < sizeof(*mps); ++BB)
@@ -353,32 +353,32 @@ int morningInitParseState(MorningParseState* mps)
     return 1;
 }
 
-int morningIsTerminal(MorningParseState* mps, int NTN)
+int morningIsTerminal(MorningRecogState* mps, int NTN)
 {
     if (!mps) return 0;
     return NTN >= mps->NumRules;
 }
 
-int morningIsNonterminal(MorningParseState* mps, int NTN)
+int morningIsNonterminal(MorningRecogState* mps, int NTN)
 {
     if (!mps) return 0;
     return NTN && (NTN < mps->NumRules);
 }
 
-int morningIsNull(MorningParseState* mps, int NTN)
+int morningIsNull(MorningRecogState* mps, int NTN)
 {
     if (!mps) return 0;
     return NTN && (NTN == mps->NullTerminal);
 }
 
-int morningIsInNullKernel(MorningParseState* mps, int NTN)
+int morningIsInNullKernel(MorningRecogState* mps, int NTN)
 {
     if (!morningIsNonterminal(mps, NTN)) return 0;
     if (!mps->NullSet) return 0;
     return mps->NullSet[NTN];
 }
 
-int morningSequenceLength(MorningParseState* mps, int AltStart)
+int morningSequenceLength(MorningRecogState* mps, int AltStart)
 {
     if (!mps) return 0;
     int AA  = AltStart;
@@ -389,7 +389,7 @@ int morningSequenceLength(MorningParseState* mps, int AltStart)
     return AA - AltStart;
 }
 
-int morningRuleLength(MorningParseState* mps, int RuleStart)
+int morningRuleLength(MorningRecogState* mps, int RuleStart)
 {
     if (!mps) return 0;
     int SeqLen  = 0;
@@ -402,13 +402,13 @@ int morningRuleLength(MorningParseState* mps, int RuleStart)
     return SeqLen;
 }
 
-int morningEndOfGrammar(MorningParseState* mps, int RuleStart)
+int morningEndOfGrammar(MorningRecogState* mps, int RuleStart)
 {
     if (!mps) return 0;
     return !!!mps->Grammar[RuleStart];
 }
 
-int morningRuleBase(MorningParseState* mps, MorningItem* item)
+int morningRuleBase(MorningRecogState* mps, MorningItem* item)
 {
     if (!mps) return 0;
     if (!item) return 0;
@@ -418,7 +418,7 @@ int morningRuleBase(MorningParseState* mps, MorningItem* item)
     return AltBase;
 }
 
-int morningAltBase(MorningParseState* mps, MorningItem* item)
+int morningAltBase(MorningRecogState* mps, MorningItem* item)
 {
     if (!mps) return 0;
     if (!item) return 0;
@@ -430,7 +430,7 @@ int morningAltBase(MorningParseState* mps, MorningItem* item)
     return AltBase;
 }
 
-int morningGetNTN(MorningParseState* mps, MorningItem* item)
+int morningGetNTN(MorningRecogState* mps, MorningItem* item)
 {
     if (!mps) return 0;
     if (!item) return 0;
@@ -444,7 +444,7 @@ int morningGetNTN(MorningParseState* mps, MorningItem* item)
     return NTN;
 }
 
-int morningNumAlternates(MorningParseState* mps, MorningItem* item)
+int morningNumAlternates(MorningRecogState* mps, MorningItem* item)
 {
     if (!mps) return 0;
     if (!item) return 0;
@@ -452,7 +452,7 @@ int morningNumAlternates(MorningParseState* mps, MorningItem* item)
     return mps->RAT[item->Rule][1] - mps->RAT[item->Rule][0];
 }
 
-int morningBuildRandomAccessTable(MorningParseState* mps)
+int morningBuildRandomAccessTable(MorningRecogState* mps)
 {
     if (!mps) return 0;
     if (!mps->Grammar) return 0;
@@ -478,7 +478,7 @@ int morningBuildRandomAccessTable(MorningParseState* mps)
     return 1;
 }
 
-int morningBuildNullKernel(MorningParseState* mps)
+int morningBuildNullKernel(MorningRecogState* mps)
 {
     if (!mps) return 0;
     if (mps->NullTerminal == 0)
@@ -514,7 +514,7 @@ int morningBuildNullKernel(MorningParseState* mps)
     return 1;
 }
 
-int morningParentTrigger(MorningParseState* mps, MorningItem* item, int WhichRule)
+int morningParentTrigger(MorningRecogState* mps, MorningItem* item, int WhichRule)
 {
     if (!mps) return 0;
     if (!item) return 0;
@@ -533,7 +533,7 @@ int morningParentTrigger(MorningParseState* mps, MorningItem* item, int WhichRul
     return NTN == WhichRule;
 }
 
-int morningRecognizerStep(MorningParseState* mps)
+int morningRecognizerStep(MorningRecogState* mps)
 {
     if (!mps) return -1;
 
@@ -746,7 +746,7 @@ int morningRecognizerStep(MorningParseState* mps)
     return result;
 }
 
-int morningRecognizerStepAct(MorningParseState* mps, MorningActions* mact)
+int morningRecognizerStepAct(MorningRecogState* mps, MorningActions* mact)
 {
     if (!morningRecognizerStep(mps))
     {
@@ -765,7 +765,7 @@ int morningRecognizerStepAct(MorningParseState* mps, MorningActions* mact)
     return -1;
 }
 
-int morningRecognize(MorningParseState* mps, MorningActions* mact)
+int morningRecognize(MorningRecogState* mps, MorningActions* mact)
 {
     if (!mps) return -1;
     if (!mact) return -1;

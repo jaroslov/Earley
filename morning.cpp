@@ -58,7 +58,7 @@ const char* GS[]    =
 #undef G_TABLE_X
 };
 
-void printItem(MorningParseState* mps, MorningItem* item)
+void printItem(MorningRecogState* mps, MorningItem* item)
 {
     fprintf(stdout, "[%8d] %6s ::=", item->Index, GS[item->Rule]);
     int AltStart    = morningAltBase(mps, item);
@@ -99,9 +99,9 @@ int test()
     #define NUM_RULES       (LRULE)
     #define NUM_PRODS       (8)
 
-    unsigned char mpStore[morningParseStateSize()];
-    MorningParseState* mps  = (MorningParseState*)&mpStore[0];
-    morningInitParseState(mps);
+    unsigned char mpStore[morningRecogStateSize()];
+    MorningRecogState* mps  = (MorningRecogState*)&mpStore[0];
+    morningInitRecogState(mps);
 
     morningAddGrammar(mps, &G[0], NUM_RULES);
 
