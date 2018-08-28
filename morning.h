@@ -104,6 +104,7 @@ MORNING_PSTATE_TABLE(MORNING_ENTRY)
     X(ERROR)                    \
     X(GET_LEXEME)               \
     X(ADD_ITEM)                 \
+    X(ADD_ITEM_NEXT)            \
     X(GET_NEXT_ITEM)            \
     X(INIT_PARENT_LIST)         \
     X(GET_NEXT_PARENT_ITEM)     \
@@ -134,7 +135,6 @@ typedef struct MorningRecogState MorningRecogState;
 
 typedef struct MorningItem
 {
-    int                     Index;
     int                     Rule;
     int                     Alt;
     int                     Dot;
@@ -148,6 +148,7 @@ typedef struct MorningActions
     void           *Handle;
     MorningAction   GetLexeme;
     MorningAction   AddItem;
+    MorningAction   AddItemNext;
     MorningAction   GetNextItem;
     MorningAction   InitParentList;
     MorningAction   GetNextParentItem;
@@ -544,7 +545,6 @@ int morningRecognizerStep(MorningRecogState* mps)
         mps->State              = MORNING_PS_INIT_ITEMS;
         mps->Event              = MORNING_EVT_ADD_ITEM;
         mps->Index              = 0;
-        mps->WorkItem.Index     = 0;
         mps->WorkItem.Rule      = mps->StartRule;
         mps->WorkItem.Alt       = 0;
         mps->WorkItem.Dot       = 0;
@@ -582,9 +582,8 @@ int morningRecognizerStep(MorningRecogState* mps)
             if (NTN == mps->Lexeme)
             {
                 mps->WorkItem.Dot       += 1;
-                mps->WorkItem.Index     = mps->Index + 1;
                 mps->State              = MORNING_PS_GET_NEXT_ITEM;
-                mps->Event              = MORNING_EVT_ADD_ITEM;
+                mps->Event              = MORNING_EVT_ADD_ITEM_NEXT;
                 result                  = 1;
             }
             else
@@ -613,7 +612,6 @@ int morningRecognizerStep(MorningRecogState* mps)
             mps->State                  = MORNING_PS_ADD_PARENT_ITEM;
             mps->Event                  = MORNING_EVT_ADD_ITEM;
             mps->WorkItem               = *mps->NewItem;
-            mps->WorkItem.Index         = mps->Index;
             mps->WorkItem.Dot           += 1;
             result                      = 1;
         }
@@ -663,7 +661,6 @@ int morningRecognizerStep(MorningRecogState* mps)
             int NTN                     = morningGetNTN(mps, &mps->WorkItem);
             mps->State                  = MORNING_PS_PREDICTION;
             mps->Event                  = MORNING_EVT_ADD_ITEM;
-            mps->WorkItem.Index         = mps->Index;
             mps->WorkItem.Rule          = NTN;
             mps->WorkItem.Alt           = 0;
             mps->WorkItem.Dot           = 0;
@@ -698,7 +695,6 @@ int morningRecognizerStep(MorningRecogState* mps)
                 {
                     mps->State              = MORNING_PS_PREDICTION;
                     mps->Event              = MORNING_EVT_ADD_ITEM;
-                    mps->WorkItem.Index     = mps->Index;
                     mps->WorkItem.Rule      = NTN;
                     mps->WorkItem.Alt       = 0;
                     mps->WorkItem.Dot       = 0;
@@ -746,6 +742,7 @@ int morningRecognizerStepAct(MorningRecogState* mps, MorningActions* mact)
     case MORNING_EVT_ERROR                  : return -1;
     case MORNING_EVT_GET_LEXEME             : return mact->GetLexeme(mact->Handle, mps);
     case MORNING_EVT_ADD_ITEM               : return mact->AddItem(mact->Handle, mps);
+    case MORNING_EVT_ADD_ITEM_NEXT          : return mact->AddItemNext(mact->Handle, mps);
     case MORNING_EVT_GET_NEXT_ITEM          : return mact->GetNextItem(mact->Handle, mps);
     case MORNING_EVT_INIT_PARENT_LIST       : return mact->InitParentList(mact->Handle, mps);
     case MORNING_EVT_GET_NEXT_PARENT_ITEM   : return mact->GetNextParentItem(mact->Handle, mps);

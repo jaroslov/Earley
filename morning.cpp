@@ -16,8 +16,8 @@ int main(int argc, char *argv[])
 
 bool operator< (MorningItem const& left, MorningItem const& right)
 {
-    int L[5] = { left.Index,  left.Rule,  left.Alt,  left.Dot,  left.Source  };
-    int R[5] = { right.Index, right.Rule, right.Alt, right.Dot, right.Source };
+    int L[5] = { left.Rule,  left.Alt,  left.Dot,  left.Source  };
+    int R[5] = { right.Rule, right.Alt, right.Dot, right.Source };
     return std::lexicographical_compare(&L[0], &L[0] + sizeof(L)/sizeof(L[0]),
                                         &R[0], &R[0] + sizeof(R)/sizeof(R[0]));
 }
@@ -58,9 +58,9 @@ const char* GS[]    =
 #undef G_TABLE_X
 };
 
-void printItem(MorningRecogState* mps, MorningItem* item)
+void printItem(int Index, MorningRecogState* mps, MorningItem* item)
 {
-    fprintf(stdout, "[%8d] %6s ::=", item->Index, GS[item->Rule]);
+    fprintf(stdout, "[%8d] %6s ::=", Index, GS[item->Rule]);
     int AltStart    = morningAltBase(mps, item);
     int AltLen      = morningSequenceLength(mps, AltStart);
     int prLen       = 0;
@@ -70,7 +70,7 @@ void printItem(MorningRecogState* mps, MorningItem* item)
     }
     prLen           += fprintf(stdout, "%s", (item->Dot == AltLen) ? "*" : " ");
     fprintf(stdout, "%*.*s (%d)", (28 - prLen), (28 - prLen), "", item->Source);
-    //fprintf(stdout, " : %d%d%d%d%d", item->Index, item->Rule, item->Alt, item->Dot, item->Source);
+    //fprintf(stdout, " : %d%d%d%d%d", Index, item->Rule, item->Alt, item->Dot, item->Source);
     fprintf(stdout, "%s", "\n");
 }
 
@@ -146,18 +146,18 @@ int test()
         RuleStart   += Len + 1;
     }
 
-    MorningItem item    = { 0, 1, 0, 0, 0 };
-    printItem(mps, &item);
+    MorningItem item    = { 1, 0, 0, 0 };
+    printItem(0, mps, &item);
     fprintf(stdout, "What? %s\n", GS[morningGetNTN(mps, &item)]);
     item.Alt            = 1;
-    printItem(mps, &item);
+    printItem(0, mps, &item);
     fprintf(stdout, "What? %s\n", GS[morningGetNTN(mps, &item)]);
     item.Rule           = 1;
     item.Alt            = 0;
-    printItem(mps, &item);
+    printItem(0, mps, &item);
     fprintf(stdout, "What? %s\n", GS[morningGetNTN(mps, &item)]);
     item.Alt            = 1;
-    printItem(mps, &item);
+    printItem(0, mps, &item);
     fprintf(stdout, "What? %s\n", GS[morningGetNTN(mps, &item)]);
 
     int lexemes[]   = { DIG, PLUS, LPAR, DIG, MUL, DIG, PLUS, DIG, RPAR, END };
@@ -184,6 +184,7 @@ int test()
     while (1)
     {
         int result  = morningRecognizerStep(mps);
+        int Index   = morningGetIndex(mps);
         if (result != 1)
         {
             break;
@@ -199,18 +200,19 @@ int test()
             fprintf(stdout, "       --> %s.\n", "GET LEXEME");
             morningSetLexeme(mps, lexemes[morningGetIndex(mps)]);
             break;
+        case MORNING_EVT_ADD_ITEM_NEXT          : Index += 1;
         case MORNING_EVT_ADD_ITEM               :
             {
-                auto iitr       = gcb.items[WorkItem->Index].find(*WorkItem);
-                if (iitr != gcb.items[WorkItem->Index].end())
+                auto iitr       = gcb.items[Index].find(*WorkItem);
+                if (iitr != gcb.items[Index].end())
                 {
                     break;
                 }
-                fprintf(stdout, "       --> ITEM ADDED to idx %d.\n", WorkItem->Index);
+                fprintf(stdout, "       --> ITEM ADDED to idx %d.\n", Index);
                 fprintf(stdout, "%s", "           ");
-                printItem(mps, WorkItem);
-                gcb.items[WorkItem->Index].insert(*WorkItem);
-                gcb.unused[WorkItem->Index].insert(*WorkItem);
+                printItem(Index, mps, WorkItem);
+                gcb.items[Index].insert(*WorkItem);
+                gcb.unused[Index].insert(*WorkItem);
             }
             break;
         case MORNING_EVT_GET_NEXT_ITEM          :
@@ -225,7 +227,7 @@ int test()
                 gcb.unused[morningGetIndex(mps)].erase(gcb.unused[morningGetIndex(mps)].begin());
                 morningSetNewItem(mps, &NewItem);
                 fprintf(stdout, "%s", "           ");
-                printItem(mps, &NewItem);
+                printItem(Index, mps, &NewItem);
             }
             break;
         case MORNING_EVT_INIT_PARENT_LIST       :
@@ -235,7 +237,7 @@ int test()
                 for (auto& item : gcb.items[WorkItem->Source])
                 {
                     fprintf(stdout, "%s", "       FILTERING:\n       ");
-                    printItem(mps, (MorningItem*)&item);
+                    printItem(Index, mps, (MorningItem*)&item);
                     if (morningParentTrigger(mps, (MorningItem*)&item, WorkItem->Rule))
                     {
                         fprintf(stdout, "%s", "       ADDING.\n");
@@ -267,7 +269,7 @@ int test()
         fprintf(stdout, "===%*.*s%d%*.*s===\n", pre, pre, "", Index, pos, pos, "");
         for (auto& item : items.second)
         {
-            printItem(mps, (MorningItem*)&item);
+            printItem(Index, mps, (MorningItem*)&item);
         }
         fprintf(stdout, "%s", "\n");
         ++Index;
