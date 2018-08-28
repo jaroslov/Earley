@@ -19,7 +19,7 @@ CC			:= $(ACCELERATE) clang
 CXX			:= $(ACCELERATE) clang++
 CFLAGS		?= -g
 CXXFLAGS	?= -g
-CFLAGSi		:= $(CFLAGS) -std=c11
+CFLAGSi		:= $(CFLAGS) -std=c11 -Wall -Werror
 CXXFLAGSi	:= $(CXXFLAGS) -std=c++11
 
 all			: $(BINi)/morning

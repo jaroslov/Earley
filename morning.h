@@ -132,6 +132,7 @@ MORNING_ACTION_TABLE(MORNING_ENTRY)
 } MORNING_ACTION;
 
 typedef struct MorningRecogState MorningRecogState;
+typedef struct MorningParseState MorningParseState;
 
 typedef struct MorningItem
 {
@@ -141,18 +142,23 @@ typedef struct MorningItem
     int                     Source;
 } MorningItem;
 
-typedef int (*MorningAction)    (void*, MorningRecogState*);
+typedef int (*MorningRecogAction)    (void*, MorningRecogState*);
 
-typedef struct MorningActions
+typedef struct MorningRecogActions
 {
-    void           *Handle;
-    MorningAction   GetLexeme;
-    MorningAction   AddItem;
-    MorningAction   AddItemNext;
-    MorningAction   GetNextItem;
-    MorningAction   InitParentList;
-    MorningAction   GetNextParentItem;
-} MorningActions;
+    void                   *Handle;
+    MorningRecogAction      GetLexeme;
+    MorningRecogAction      AddItem;
+    MorningRecogAction      AddItemNext;
+    MorningRecogAction      GetNextItem;
+    MorningRecogAction      InitParentList;
+    MorningRecogAction      GetNextParentItem;
+} MorningRecogActions;
+
+typedef struct MorningParseActions
+{
+    void                   *Handle;
+} MorningParseActions;
 
 int morningRecogStateSize();
 int morningInitRecogState(MorningRecogState*);
@@ -187,8 +193,15 @@ int morningBuildRandomAccessTable(MorningRecogState*);
 int morningBuildNullKernel(MorningRecogState*);
 
 int morningRecognizerStep(MorningRecogState* mps);
-int morningRecognizerStepAct(MorningRecogState* mps, MorningActions* mact);
-int morningRecognize(MorningRecogState*, MorningActions* mact);
+int morningRecognizerStepAct(MorningRecogState* mps, MorningRecogActions* mact);
+int morningRecognize(MorningRecogState*, MorningRecogActions* mact);
+
+int morningParseStateSize();
+int morningInitParseState(MorningParseState*);
+
+int morningParserStep(MorningParseState* mps);
+int morningParserStepAct(MorningParseState* mps, MorningParseActions* mact);
+int morningParse(MorningParseState*, MorningParseActions* mact);
 
 #ifdef __cplusplus
 } // extern "C"
@@ -202,31 +215,6 @@ int morningRecognize(MorningRecogState*, MorningActions* mact);
 extern "C"
 {
 #endif
-
-/*
-
-    We parse 'on the fly'. The general idea is that as we complete
-    (or match a token) we define a Recog-action for that event, i.e.,
-
-        Action(MorningItem, Index, ...)
-
-    This kind of needs to be causal. So, we need the Action event
-    to return an 'AST' handle.
-
-        Action(MorningItem, Index, ASTHandle)
-
-    Which says who caused us. Unfortunately, our current abstract
-    data structure 'loses' this information. We can recover it, but
-    it requires us to walk the items. There's two ways to solve this
-    issue:
-
-        1. Suck it up, and walk the items; or,
-        2. Add a 'registration' to AddItem() such that we write
-            down *who* caused us to add an item. We're really only
-            interested in two 'who's: Scan and Complete. Predict
-            isn't interesting.
-
-*/
 
 typedef struct MorningRecogState
 {
@@ -731,7 +719,7 @@ int morningRecognizerStep(MorningRecogState* mps)
     return result;
 }
 
-int morningRecognizerStepAct(MorningRecogState* mps, MorningActions* mact)
+int morningRecognizerStepAct(MorningRecogState* mps, MorningRecogActions* mact)
 {
     if (!morningRecognizerStep(mps))
     {
@@ -751,7 +739,7 @@ int morningRecognizerStepAct(MorningRecogState* mps, MorningActions* mact)
     return -1;
 }
 
-int morningRecognize(MorningRecogState* mps, MorningActions* mact)
+int morningRecognize(MorningRecogState* mps, MorningRecogActions* mact)
 {
     if (!mps) return -1;
     if (!mact) return -1;
