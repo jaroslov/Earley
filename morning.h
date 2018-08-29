@@ -77,7 +77,7 @@ extern "C"
 
 */
 
-#define MORNING_PSTATE_TABLE(X) \
+#define MORNING_RSTATE_TABLE(X) \
     X(ERROR)                    \
     X(INIT)                     \
     X(INIT_ITEMS)               \
@@ -92,13 +92,13 @@ extern "C"
     X(PREDICT_NULLABLE)         \
     X(NONE)
 
-typedef enum MORNING_PSTATE
+typedef enum MORNING_RSTATE
 {
 #undef MORNING_ENTRY
-#define MORNING_ENTRY(E) MORNING_PS_ ## E,
-MORNING_PSTATE_TABLE(MORNING_ENTRY)
+#define MORNING_ENTRY(E) MORNING_RS_ ## E,
+MORNING_RSTATE_TABLE(MORNING_ENTRY)
 #undef MORNING_ENTRY
-} MORNING_PSTATE;
+} MORNING_RSTATE;
 
 #define MORNING_EVENT_TABLE(X)  \
     X(ERROR)                    \
@@ -184,7 +184,7 @@ int morningSetNewItem(MorningRecogState*, MorningItem* NewItem);
 
 int* morningGetGrammar(MorningRecogState*);
 int morningGetIndex(MorningRecogState*);
-MORNING_PSTATE morningGetState(MorningRecogState*);
+MORNING_RSTATE morningGetState(MorningRecogState*);
 MORNING_EVENT morningGetEvent(MorningRecogState*);
 int morningGetWorkItem(MorningRecogState*, MorningItem** WorkItem);
 int morningParentTrigger(MorningRecogState* mrs, MorningItem* item, int WhichRule);
@@ -228,7 +228,7 @@ typedef struct MorningRecogState
 
     int                     Index;
     int                     LastToken;
-    MORNING_PSTATE          State;
+    MORNING_RSTATE          State;
     MORNING_EVENT           Event;
     MorningItem             WorkItem;
     MorningItem            *NewItem;
@@ -298,9 +298,9 @@ int morningGetIndex(MorningRecogState* mrs)
     return mrs->Index;
 }
 
-MORNING_PSTATE morningGetState(MorningRecogState* mrs)
+MORNING_RSTATE morningGetState(MorningRecogState* mrs)
 {
-    if (!mrs) return MORNING_PS_ERROR;
+    if (!mrs) return MORNING_RS_ERROR;
     return mrs->State;
 }
 
@@ -330,7 +330,7 @@ int morningInitRecogState(MorningRecogState* mrs)
     {
         ((unsigned char*)mrs)[BB] = 0;
     }
-    mrs->State      = MORNING_PS_INIT;
+    mrs->State      = MORNING_RS_INIT;
     return 1;
 }
 
@@ -523,14 +523,14 @@ int morningRecognizerStep(MorningRecogState* mrs)
 
     switch (mrs->State)
     {
-    case MORNING_PS_ERROR                   :
+    case MORNING_RS_ERROR                   :
         result                  = -1;
         break;
-    case MORNING_PS_NONE                    :
+    case MORNING_RS_NONE                    :
         result                  = 0;
         break;
-    case MORNING_PS_INIT                    :
-        mrs->State              = MORNING_PS_INIT_ITEMS;
+    case MORNING_RS_INIT                    :
+        mrs->State              = MORNING_RS_INIT_ITEMS;
         mrs->Event              = MORNING_EVT_ADD_ITEM;
         mrs->Index              = 0;
         mrs->WorkItem.Rule      = mrs->StartRule;
@@ -539,7 +539,7 @@ int morningRecognizerStep(MorningRecogState* mrs)
         mrs->WorkItem.Source    = 0;
         result                  = mrs->StartRule && (mrs->StartRule <= mrs->NumRules);
         break;
-    case MORNING_PS_INIT_ITEMS              :
+    case MORNING_RS_INIT_ITEMS              :
         {
             int NumAlts         = morningNumAlternates(mrs, &mrs->WorkItem);
             ++mrs->WorkItem.Alt;
@@ -549,18 +549,18 @@ int morningRecognizerStep(MorningRecogState* mrs)
             }
             else
             {
-                mrs->State      = MORNING_PS_ANALYZE_ITEM;
+                mrs->State      = MORNING_RS_ANALYZE_ITEM;
                 mrs->Event      = MORNING_EVT_GET_NEXT_ITEM;
             }
             result              = 1;
         }
         break;
-    case MORNING_PS_LEX_NEXT                :
-        mrs->State                      = MORNING_PS_ANALYZE_ITEM;
+    case MORNING_RS_LEX_NEXT                :
+        mrs->State                      = MORNING_RS_ANALYZE_ITEM;
         mrs->Event                      = MORNING_EVT_GET_NEXT_ITEM;
         result                          = 1;
         break;
-    case MORNING_PS_SCANNING                :
+    case MORNING_RS_SCANNING                :
         //
         // SCANNER. If [A -> ... * a .., j] is in S_i and a = x_i+1,
         //          add [ A -> ... a * ..., j] to S_i+1
@@ -570,34 +570,34 @@ int morningRecognizerStep(MorningRecogState* mrs)
             if (NTN == mrs->Lexeme)
             {
                 mrs->WorkItem.Dot       += 1;
-                mrs->State              = MORNING_PS_GET_NEXT_ITEM;
+                mrs->State              = MORNING_RS_GET_NEXT_ITEM;
                 mrs->Event              = MORNING_EVT_ADD_ITEM_NEXT;
                 result                  = 1;
             }
             else
             {
-                mrs->State              = MORNING_PS_ANALYZE_ITEM;
+                mrs->State              = MORNING_RS_ANALYZE_ITEM;
                 mrs->Event              = MORNING_EVT_GET_NEXT_ITEM;
                 result                  = 1;
             }
         }
         break;
-    case MORNING_PS_COMPLETION              :
+    case MORNING_RS_COMPLETION              :
         //
         // COMPLETER. If [A -> ... *, j] is in S_i, add
         //          [B -> ... A * ..., k] to S_i for all items
         //          [B -> ... * A ..., k] in S_j
         //
         {
-            mrs->State                  = MORNING_PS_GET_NEXT_PARENT_ITEM;
+            mrs->State                  = MORNING_RS_GET_NEXT_PARENT_ITEM;
             mrs->Event                  = MORNING_EVT_GET_NEXT_PARENT_ITEM;
             result                      = 1;
         }
         break;
-    case MORNING_PS_GET_NEXT_PARENT_ITEM    :
+    case MORNING_RS_GET_NEXT_PARENT_ITEM    :
         if (mrs->NewItem)
         {
-            mrs->State                  = MORNING_PS_ADD_PARENT_ITEM;
+            mrs->State                  = MORNING_RS_ADD_PARENT_ITEM;
             mrs->Event                  = MORNING_EVT_ADD_ITEM;
             mrs->WorkItem               = *mrs->NewItem;
             mrs->WorkItem.Dot           += 1;
@@ -605,17 +605,17 @@ int morningRecognizerStep(MorningRecogState* mrs)
         }
         else
         {
-            mrs->State                  = MORNING_PS_ANALYZE_ITEM;
+            mrs->State                  = MORNING_RS_ANALYZE_ITEM;
             mrs->Event                  = MORNING_EVT_GET_NEXT_ITEM;
             result                      = 1;
         }
         break;
-    case MORNING_PS_ADD_PARENT_ITEM         :
-        mrs->State                      = MORNING_PS_GET_NEXT_PARENT_ITEM;
+    case MORNING_RS_ADD_PARENT_ITEM         :
+        mrs->State                      = MORNING_RS_GET_NEXT_PARENT_ITEM;
         mrs->Event                      = MORNING_EVT_GET_NEXT_PARENT_ITEM;
         result                          = 1;
         break;
-    case MORNING_PS_PREDICTION              :
+    case MORNING_RS_PREDICTION              :
         //
         // PREDICTOR. If [A -> ... *  B ..., j] is in S_i, add
         //          [B -> * C ..., i] to S_i for all rules B -> C
@@ -629,25 +629,25 @@ int morningRecognizerStep(MorningRecogState* mrs)
             }
             else
             {
-                mrs->State              = MORNING_PS_ANALYZE_ITEM;
+                mrs->State              = MORNING_RS_ANALYZE_ITEM;
                 mrs->Event              = MORNING_EVT_GET_NEXT_ITEM;
             }
             result                      = 1;
         }
         break;
-    case MORNING_PS_GET_NEXT_ITEM           :
-        mrs->State                      = MORNING_PS_ANALYZE_ITEM;
+    case MORNING_RS_GET_NEXT_ITEM           :
+        mrs->State                      = MORNING_RS_ANALYZE_ITEM;
         mrs->Event                      = MORNING_EVT_GET_NEXT_ITEM;
         result                          = 1;
         break;
-    case MORNING_PS_PREDICT_NULLABLE        :
+    case MORNING_RS_PREDICT_NULLABLE        :
         // If B is nullable, we also need to save off:
         //     [A -> ... B * ..., j]
         // Then we go on to the regular prediction.
         {
             mrs->WorkItem.Dot           = -1;
             int NTN                     = morningGetNTN(mrs, &mrs->WorkItem);
-            mrs->State                  = MORNING_PS_PREDICTION;
+            mrs->State                  = MORNING_RS_PREDICTION;
             mrs->Event                  = MORNING_EVT_ADD_ITEM;
             mrs->WorkItem.Rule          = NTN;
             mrs->WorkItem.Alt           = 0;
@@ -656,14 +656,14 @@ int morningRecognizerStep(MorningRecogState* mrs)
             result                      = 1;
         }
         break;
-    case MORNING_PS_ANALYZE_ITEM            :
+    case MORNING_RS_ANALYZE_ITEM            :
         if (mrs->NewItem)
         {
             mrs->WorkItem               = *mrs->NewItem;
             int NTN                     = morningGetNTN(mrs, &mrs->WorkItem);
             if (NTN == 0)
             {
-                mrs->State              = MORNING_PS_COMPLETION;
+                mrs->State              = MORNING_RS_COMPLETION;
                 mrs->Event              = MORNING_EVT_INIT_PARENT_LIST;
                 result                  = 1;
             }
@@ -674,14 +674,14 @@ int morningRecognizerStep(MorningRecogState* mrs)
                 int nextNTN             = morningGetNTN(mrs, &Next);
                 if ((nextNTN < mrs->NumRules) && mrs->NullSet[nextNTN])
                 {
-                    mrs->State              = MORNING_PS_PREDICT_NULLABLE;
+                    mrs->State              = MORNING_RS_PREDICT_NULLABLE;
                     mrs->Event              = MORNING_EVT_ADD_ITEM;
                     mrs->WorkItem           = Next;
                     result                  = 1;
                 }
                 else
                 {
-                    mrs->State              = MORNING_PS_PREDICTION;
+                    mrs->State              = MORNING_RS_PREDICTION;
                     mrs->Event              = MORNING_EVT_ADD_ITEM;
                     mrs->WorkItem.Rule      = NTN;
                     mrs->WorkItem.Alt       = 0;
@@ -692,7 +692,7 @@ int morningRecognizerStep(MorningRecogState* mrs)
             }
             else
             {
-                mrs->State              = MORNING_PS_SCANNING;
+                mrs->State              = MORNING_RS_SCANNING;
                 mrs->Event              = MORNING_EVT_GET_LEXEME;
                 result                  = 1;
             }
@@ -702,7 +702,7 @@ int morningRecognizerStep(MorningRecogState* mrs)
             if (mrs->Lexeme)
             {
                 mrs->Index              += 1;
-                mrs->State              = MORNING_PS_LEX_NEXT;
+                mrs->State              = MORNING_RS_LEX_NEXT;
                 mrs->Event              = MORNING_EVT_GET_LEXEME;
                 result                  = 1;
             }

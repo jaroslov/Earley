@@ -169,7 +169,7 @@ int test()
     #define MORNING_ENTRY(X) # X,
     static const char* STATES[] =
     {
-        MORNING_PSTATE_TABLE(MORNING_ENTRY)
+        MORNING_RSTATE_TABLE(MORNING_ENTRY)
     };
     #undef MORNING_ENTRY
     #undef MORNING_ACTION
