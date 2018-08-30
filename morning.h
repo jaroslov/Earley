@@ -142,17 +142,22 @@ typedef struct MorningItem
     int                     Source;
 } MorningItem;
 
-typedef int (*MorningRecogAction)    (void*, MorningRecogState*);
+typedef int (*MorningRecogGetLexeme)            (void*, MorningRecogState*, int* Lexeme);
+typedef int (*MorningRecogAddItem)              (void*, MorningRecogState*, int ToIndex, MorningItem* Item, MorningItem* Reason);
+typedef int (*MorningRecogAddItem)              (void*, MorningRecogState*, int ToIndex, MorningItem* Item, MorningItem* Reason);
+typedef int (*MorningRecogGetNextItem)          (void*, MorningRecogState*, int FromIndex, MorningItem** NewItem);
+typedef int (*MorningRecogInitParentList)       (void*, MorningRecogState*, int AtIndex);
+typedef int (*MorningRecogGetNextParentItem)    (void*, MorningRecogState*, int AtIndex, MorningItem** ParentItem);
 
 typedef struct MorningRecogActions
 {
     void                   *Handle;
-    MorningRecogAction      GetLexeme;
-    MorningRecogAction      AddItem;
-    MorningRecogAction      AddItemNext;
-    MorningRecogAction      GetNextItem;
-    MorningRecogAction      InitParentList;
-    MorningRecogAction      GetNextParentItem;
+    MorningRecogGetLexeme           GetLexeme;
+    MorningRecogAddItem             AddItem;
+    MorningRecogAddItem             AddItemNext;
+    MorningRecogGetNextItem         GetNextItem;
+    MorningRecogInitParentList      InitParentList;
+    MorningRecogGetNextParentItem   GetNextParentItem;
 } MorningRecogActions;
 
 typedef struct MorningParseActions
@@ -230,6 +235,7 @@ typedef struct MorningRecogState
     int                     LastToken;
     MORNING_RSTATE          State;
     MORNING_EVENT           Event;
+    MorningItem             Reason;
     MorningItem             WorkItem;
     MorningItem            *NewItem;
     int                     Lexeme;
@@ -533,6 +539,10 @@ int morningRecognizerStep(MorningRecogState* mrs)
         mrs->State              = MORNING_RS_INIT_ITEMS;
         mrs->Event              = MORNING_EVT_ADD_ITEM;
         mrs->Index              = 0;
+        mrs->Reason.Rule        = -1;
+        mrs->Reason.Alt         = -1;
+        mrs->Reason.Dot         = -1;
+        mrs->Reason.Source      = -1;
         mrs->WorkItem.Rule      = mrs->StartRule;
         mrs->WorkItem.Alt       = 0;
         mrs->WorkItem.Dot       = 0;
@@ -661,6 +671,7 @@ int morningRecognizerStep(MorningRecogState* mrs)
         {
             mrs->WorkItem               = *mrs->NewItem;
             int NTN                     = morningGetNTN(mrs, &mrs->WorkItem);
+            mrs->Reason                 = mrs->WorkItem;
             if (NTN == 0)
             {
                 mrs->State              = MORNING_RS_COMPLETION;
@@ -725,18 +736,41 @@ int morningRecognizerStepAct(MorningRecogState* mrs, MorningRecogActions* mact)
     {
         return 0;
     }
+    int                                     Lexeme  = 0;
+    int                                     Index   = morningGetIndex(mrs);
+    MorningItem                            *NItem   = 0;
+    int                                     result  = 0;
     switch (mrs->Event)
     {
-    case MORNING_EVT_ERROR                  : return -1;
-    case MORNING_EVT_GET_LEXEME             : return mact->GetLexeme(mact->Handle, mrs);
-    case MORNING_EVT_ADD_ITEM               : return mact->AddItem(mact->Handle, mrs);
-    case MORNING_EVT_ADD_ITEM_NEXT          : return mact->AddItemNext(mact->Handle, mrs);
-    case MORNING_EVT_GET_NEXT_ITEM          : return mact->GetNextItem(mact->Handle, mrs);
-    case MORNING_EVT_INIT_PARENT_LIST       : return mact->InitParentList(mact->Handle, mrs);
-    case MORNING_EVT_GET_NEXT_PARENT_ITEM   : return mact->GetNextParentItem(mact->Handle, mrs);
-    case MORNING_EVT_NONE                   : return 0;
+    case MORNING_EVT_ERROR                  :
+        result                              = -1;
+        break;
+    case MORNING_EVT_GET_LEXEME             :
+        result                              = mact->GetLexeme(mact->Handle, mrs, &Lexeme);
+        morningSetLexeme(mrs, Lexeme);
+        break;
+    case MORNING_EVT_ADD_ITEM               :
+        result                              = mact->AddItem(mact->Handle, mrs, Index, &mrs->WorkItem, &mrs->Reason);
+        break;
+    case MORNING_EVT_ADD_ITEM_NEXT          :
+        result                              = mact->AddItemNext(mact->Handle, mrs, Index+1, &mrs->WorkItem, &mrs->Reason);
+        break;
+    case MORNING_EVT_GET_NEXT_ITEM          :
+        result                              = mact->GetNextItem(mact->Handle, mrs, Index, &NItem);
+        morningSetNewItem(mrs, NItem);
+        break;
+    case MORNING_EVT_INIT_PARENT_LIST       :
+        result                              = mact->InitParentList(mact->Handle, mrs, Index);
+        break;
+    case MORNING_EVT_GET_NEXT_PARENT_ITEM   :
+        result                              = mact->GetNextParentItem(mact->Handle, mrs, Index, &NItem);
+        morningSetNewItem(mrs, NItem);
+        break;
+    case MORNING_EVT_NONE                   :
+        result                              = 0;
+        break;
     }
-    return -1;
+    return result;
 }
 
 int morningRecognize(MorningRecogState* mrs, MorningRecogActions* mact)
