@@ -750,10 +750,10 @@ int morningRecognizerStepAct(MorningRecogState* mrs, MorningRecogActions* mact)
         morningSetLexeme(mrs, Lexeme);
         break;
     case MORNING_EVT_ADD_ITEM               :
-        result                              = mact->AddItem(mact->Handle, mrs, Index, &mrs->WorkItem, &mrs->Reason);
+        result                              = mact->AddItem(mact->Handle, mrs, Index, &mrs->WorkItem, (mrs->State == MORNING_RS_ADD_PARENT_ITEM) ? &mrs->Reason : 0);
         break;
     case MORNING_EVT_ADD_ITEM_NEXT          :
-        result                              = mact->AddItemNext(mact->Handle, mrs, Index+1, &mrs->WorkItem, &mrs->Reason);
+        result                              = mact->AddItemNext(mact->Handle, mrs, Index+1, &mrs->WorkItem, 0);
         break;
     case MORNING_EVT_GET_NEXT_ITEM          :
         result                              = mact->GetNextItem(mact->Handle, mrs, Index, &NItem);
