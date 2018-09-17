@@ -97,6 +97,7 @@ int grRecogAddItem(void* handle, MorningRecogState* mrs, int ToIndex, MorningIte
         return 1;
     }
     fprintf(stdout, "       --> ITEM ADDED to idx %d.\n", ToIndex);
+    fprintf(stdout, "       REASON: %s\n", morningIsCompleted(mrs, Reason) ? "rule-completed" : "subrule-completed");
     fprintf(stdout, "%s", "           ");
     printItem(ToIndex, mrs, WorkItem);
     gcb.items[ToIndex].insert(*WorkItem);

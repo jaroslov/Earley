@@ -171,6 +171,7 @@ int morningInitRecogState(MorningRecogState*);
 int morningIsTerminal(MorningRecogState*, int NTN);
 int morningIsNonterminal(MorningRecogState*, int NTN);
 int morningIsNull(MorningRecogState*, int NTN);
+int morningIsCompleted(MorningRecogState*, MorningItem*);
 int morningIsInNullKernel(MorningRecogState*, int NTN);
 int morningSequenceLength(MorningRecogState*, int AltStart);
 int morningRuleLength(MorningRecogState*, int RuleStart);
@@ -356,6 +357,15 @@ int morningIsNull(MorningRecogState* mrs, int NTN)
 {
     if (!mrs) return 0;
     return NTN && (NTN == mrs->NullTerminal);
+}
+
+int morningIsCompleted(MorningRecogState* mrs, MorningItem* item)
+{
+    if (!mrs) return 0;
+    if (!item) return 0;
+    int RuleBase    = mrs->RAT[item->Rule][0];
+    int AltBase     = mrs->ARAT[RuleBase + item->Alt];
+    return !!!mrs->Grammar[AltBase + item->Dot];
 }
 
 int morningIsInNullKernel(MorningRecogState* mrs, int NTN)
