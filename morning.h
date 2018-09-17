@@ -142,16 +142,16 @@ typedef struct MorningItem
     int                     Source;
 } MorningItem;
 
-typedef int (*MorningRecogGetLexeme)            (void*, MorningRecogState*, int* Lexeme);
+typedef int (*MorningRecogGetLexeme)            (void*, MorningRecogState*, int AtIndex, int* Lexeme);
 typedef int (*MorningRecogAddItem)              (void*, MorningRecogState*, int ToIndex, MorningItem* Item, MorningItem* Reason);
 typedef int (*MorningRecogAddItem)              (void*, MorningRecogState*, int ToIndex, MorningItem* Item, MorningItem* Reason);
 typedef int (*MorningRecogGetNextItem)          (void*, MorningRecogState*, int FromIndex, MorningItem** NewItem);
-typedef int (*MorningRecogInitParentList)       (void*, MorningRecogState*, int AtIndex);
+typedef int (*MorningRecogInitParentList)       (void*, MorningRecogState*, int AtIndex, int Source, int Rule);
 typedef int (*MorningRecogGetNextParentItem)    (void*, MorningRecogState*, int AtIndex, MorningItem** ParentItem);
 
 typedef struct MorningRecogActions
 {
-    void                   *Handle;
+    void                           *Handle;
     MorningRecogGetLexeme           GetLexeme;
     MorningRecogAddItem             AddItem;
     MorningRecogAddItem             AddItemNext;
@@ -746,7 +746,7 @@ int morningRecognizerStepAct(MorningRecogState* mrs, MorningRecogActions* mact)
         result                              = -1;
         break;
     case MORNING_EVT_GET_LEXEME             :
-        result                              = mact->GetLexeme(mact->Handle, mrs, &Lexeme);
+        result                              = mact->GetLexeme(mact->Handle, mrs, Index, &Lexeme);
         morningSetLexeme(mrs, Lexeme);
         break;
     case MORNING_EVT_ADD_ITEM               :
@@ -760,7 +760,7 @@ int morningRecognizerStepAct(MorningRecogState* mrs, MorningRecogActions* mact)
         morningSetNewItem(mrs, NItem);
         break;
     case MORNING_EVT_INIT_PARENT_LIST       :
-        result                              = mact->InitParentList(mact->Handle, mrs, Index);
+        result                              = mact->InitParentList(mact->Handle, mrs, Index, mrs->WorkItem.Source, mrs->WorkItem.Rule);
         break;
     case MORNING_EVT_GET_NEXT_PARENT_ITEM   :
         result                              = mact->GetNextParentItem(mact->Handle, mrs, Index, &NItem);

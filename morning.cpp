@@ -6,12 +6,16 @@
 #include <list>
 #include <map>
 #include <set>
+#include <vector>
 
 int test();
+int ptest();
 
 int main(int argc, char *argv[])
 {
-    return test();
+    int r   = test();
+    int q   = ptest();
+    return r || q;
 }
 
 bool operator< (MorningItem const& left, MorningItem const& right)
@@ -27,6 +31,8 @@ typedef struct Gcb
     std::map<int, std::set<MorningItem>>    items;
     std::map<int, std::set<MorningItem>>    unused;
     std::list<const MorningItem*>           parents;
+    std::vector<int>                        lexemes;
+    int                                     lexWhere;
 } Gcb;
 
 #define G_TABLE(X)  \
@@ -72,6 +78,172 @@ void printItem(int Index, MorningRecogState* mrs, MorningItem* item)
     fprintf(stdout, "%*.*s (%d)", (28 - prLen), (28 - prLen), "", item->Source);
     //fprintf(stdout, " : %d%d%d%d%d", Index, item->Rule, item->Alt, item->Dot, item->Source);
     fprintf(stdout, "%s", "\n");
+}
+
+int grRecogGetLexeme(void* handle, MorningRecogState* mrs, int Index, int* Lexeme)
+{
+    Gcb& gcb        = *(Gcb*)handle;
+    *Lexeme         = gcb.lexemes[Index];
+    ++gcb.lexWhere;
+    return 1;
+}
+
+int grRecogAddItem(void* handle, MorningRecogState* mrs, int ToIndex, MorningItem* WorkItem, MorningItem* Reason)
+{
+    Gcb& gcb        = *(Gcb*)handle;
+    auto iitr       = gcb.items[ToIndex].find(*WorkItem);
+    if (iitr != gcb.items[ToIndex].end())
+    {
+        return 1;
+    }
+    fprintf(stdout, "       --> ITEM ADDED to idx %d.\n", ToIndex);
+    fprintf(stdout, "%s", "           ");
+    printItem(ToIndex, mrs, WorkItem);
+    gcb.items[ToIndex].insert(*WorkItem);
+    gcb.unused[ToIndex].insert(*WorkItem);
+    return 1;
+}
+
+int grRecogAddItemNext(void* handle, MorningRecogState* mrs, int ToIndex, MorningItem* Item, MorningItem* Reason)
+{
+    return grRecogAddItem(handle, mrs, ToIndex, Item, Reason);
+}
+
+int grRecogGetNextItem(void* handle, MorningRecogState* mrs, int FromIndex, MorningItem** NewItem)
+{
+    Gcb& gcb        = *(Gcb*)handle;
+    fprintf(stdout, "       NUM ITEMS LEFT: %d\n", (int)gcb.unused[FromIndex].size());
+    if (gcb.unused[FromIndex].empty())
+    {
+        return 1;
+    }
+    fprintf(stdout, "       --> %s.\n", "ITEM GOTTEN");
+    auto* NItem     = &*gcb.unused[FromIndex].begin();
+    *NewItem        = (MorningItem*)NItem;
+    gcb.unused[FromIndex].erase(gcb.unused[FromIndex].begin());
+    fprintf(stdout, "%s", "           ");
+    printItem(FromIndex, mrs, *NewItem);
+    return 1;
+}
+
+int grRecogInitParentList(void* handle, MorningRecogState* mrs, int AtIndex, int Source, int Rule)
+{
+    Gcb& gcb        = *(Gcb*)handle;
+    gcb.parents.clear();
+    fprintf(stdout, "       --> %s.\n", "INIT'D PARENT LIST");
+    {
+        for (auto& item : gcb.items[Source])
+        {
+            fprintf(stdout, "%s", "       FILTERING:\n       ");
+            printItem(AtIndex, mrs, (MorningItem*)&item);
+            if (morningParentTrigger(mrs, (MorningItem*)&item, Rule))
+            {
+                fprintf(stdout, "%s", "       ADDING.\n");
+                gcb.parents.push_back(&item);
+            }
+        }
+    }
+    return 1;
+}
+
+int grRecogGetNextParentItem(void* handle, MorningRecogState* mrs, int AtIndex, MorningItem** ParentItem)
+{
+    Gcb& gcb        = *(Gcb*)handle;
+    if (!gcb.parents.empty())
+    {
+        *ParentItem = (MorningItem*)gcb.parents.front();
+        gcb.parents.pop_front();
+    }
+    return 1;
+}
+
+int ptest()
+{
+    int G[] =
+    {
+        /*  SUM ::= */ SUM, PLUS, PROD, END,
+        /*       |  */ PROD, END,
+        END,
+
+        /* PROD ::= */ PROD, MUL, FAC, END,
+        /*       |  */ FAC, END,
+        END,
+
+        /*  FAC ::= */ LPAR, SUM, RPAR, END,
+        /*       |  */ NUM, END,
+        END,
+
+        /*  NUM ::= */ DIG, NUM, END,
+        /*       |  */ DIG, END,
+
+        END,
+    };
+
+    #define NUM_RULES       (LRULE)
+    #define NUM_PRODS       (8)
+
+    unsigned char mpStore[morningRecogStateSize()];
+    MorningRecogState* mrs  = (MorningRecogState*)&mpStore[0];
+    morningInitRecogState(mrs);
+
+    morningAddGrammar(mrs, &G[0], NUM_RULES);
+
+    int RAT[NUM_RULES][2]   = { };
+    int ARAT[NUM_PRODS]     = { };
+    morningAddRandomAccessTable(mrs, RAT, ARAT);
+
+    if (!morningBuildRandomAccessTable(mrs))
+    {
+        return 1;
+    }
+
+    int nullSet[NUM_RULES]  = { };
+    morningAddNullKernel(mrs, END, &nullSet[0]);
+
+    if (!morningBuildNullKernel(mrs))
+    {
+        return 1;
+    }
+
+    morningSetStartRule(mrs, SUM);
+
+    int lexemes[]   = { DIG, PLUS, LPAR, DIG, MUL, DIG, PLUS, DIG, RPAR, END };
+
+    Gcb gcb         = { };
+    gcb.lexemes     = std::vector<int>(&lexemes[0], &lexemes[0] + sizeof(lexemes)/sizeof(lexemes[0]));
+    gcb.lexWhere    = 0;
+
+    MorningRecogActions mact
+    {
+        .Handle             = (void*)&gcb,
+        .GetLexeme          = &grRecogGetLexeme,
+        .AddItem            = &grRecogAddItem,
+        .AddItemNext        = &grRecogAddItemNext,
+        .GetNextItem        = &grRecogGetNextItem,
+        .InitParentList     = &grRecogInitParentList,
+        .GetNextParentItem  = &grRecogGetNextParentItem,
+    };
+
+    morningRecognize(mrs, &mact);
+
+    fprintf(stdout, "%s", "\n");
+    int Index = 0;
+    for (auto& items : gcb.items)
+    {
+        int len     = snprintf(0, 0, "%d", Index);
+        int rem     = 8 - len;
+        int pos     = rem / 2;
+        int pre     = rem - pos;
+        fprintf(stdout, "===%*.*s%d%*.*s===\n", pre, pre, "", Index, pos, pos, "");
+        for (auto& item : items.second)
+        {
+            printItem(Index, mrs, (MorningItem*)&item);
+        }
+        fprintf(stdout, "%s", "\n");
+        ++Index;
+    }
+
+    return 0;
 }
 
 int test()
